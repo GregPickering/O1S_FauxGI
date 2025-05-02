@@ -1,0 +1,105 @@
+[gd_scene load_steps=8 format=3 uid="uid://btirfsc7rf58b"]
+
+[ext_resource type="Script" uid="uid://b4hkm2djkjy16" path="res://lighting.gd" id="1_6ffuc"]
+[ext_resource type="Script" uid="uid://d06yfe050b2oh" path="res://camera.gd" id="1_rpp60"]
+[ext_resource type="Script" uid="uid://dpjhlb182qd2e" path="res://fps.gd" id="2_6k81c"]
+[ext_resource type="PackedScene" uid="uid://b3vmtf81ju271" path="res://faux_gi.tscn" id="6_rpp60"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_bshdy"]
+albedo_color = Color(0.428036, 0.395602, 0.919279, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_6ffuc"]
+albedo_color = Color(1, 0.635294, 0.105882, 1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_bshdy"]
+radius = 0.1
+height = 0.2
+
+[node name="Scene3D" type="Node3D"]
+
+[node name="FauxGI" parent="." instance=ExtResource("6_rpp60")]
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(0.538808, -0.388396, 0.747552, 0, 0.887378, 0.461043, -0.842429, -0.248414, 0.478127, 3.0704, 3.96238, 2.2976)
+script = ExtResource("1_rpp60")
+
+[node name="Geometry" type="CSGCombiner3D" parent="."]
+use_collision = true
+
+[node name="CSGBox3D" type="CSGBox3D" parent="Geometry"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.637817, 1.77835, 0.395508)
+flip_faces = true
+size = Vector3(6.75, 5.25, 5.75)
+
+[node name="CSGBox3D3" type="CSGBox3D" parent="Geometry/CSGBox3D"]
+operation = 2
+flip_faces = true
+size = Vector3(6.5, 5, 5.5)
+
+[node name="CSGTorus3D" type="CSGTorus3D" parent="Geometry"]
+transform = Transform3D(0.629602, -0.550534, 0.548191, 0.658256, 0.752794, 0, -0.412675, 0.36085, 0.836353, 0.501693, 0.64787, -0.303848)
+sides = 36
+ring_sides = 12
+material = SubResource("StandardMaterial3D_bshdy")
+
+[node name="CSGCylinder3D" type="CSGCylinder3D" parent="Geometry"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.57043, 0.998739, -0.908187)
+sides = 24
+
+[node name="CSGSphere3D" type="CSGSphere3D" parent="Geometry"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.66665, 0.410131, -1.90844)
+radial_segments = 24
+rings = 12
+
+[node name="CSGBox3D2" type="CSGBox3D" parent="Geometry"]
+transform = Transform3D(0.707107, 0, -0.707107, 0, 1, 0, 0.707107, 0, 0.707107, -1.53112, 0.463222, 1.48286)
+material = SubResource("StandardMaterial3D_6ffuc")
+metadata/_edit_group_ = true
+
+[node name="SpinSpot" type="Node3D" parent="."]
+transform = Transform3D(0.528078, 0, 0.849196, 0, 1, 0, -0.849196, 0, 0.528078, 0, 0, 0)
+script = ExtResource("1_6ffuc")
+speed = 0.5
+
+[node name="SpotLight3D" type="SpotLight3D" parent="SpinSpot"]
+transform = Transform3D(0.952537, 0.131593, -0.274512, 0.304381, -0.396676, 0.866026, 0.00507104, -0.908477, -0.417903, 0.79985, 3.19763, -0.713908)
+light_color = Color(0.192157, 1, 0.32549, 1)
+light_energy = 4.0
+shadow_enabled = true
+spot_range = 15.0
+spot_angle = 30.0
+
+[node name="OmniLight3D" type="OmniLight3D" parent="SpinSpot"]
+transform = Transform3D(-0.128348, 0, -0.991729, 0, 1, 0, 0.991729, 0, -0.128348, -0.711475, 1.74288, -0.629222)
+shadow_enabled = true
+
+[node name="SpinDir" type="Node3D" parent="."]
+transform = Transform3D(0.323267, 0, 0.946308, 0, 1, 0, -0.946308, 0, 0.323267, 0, 0, 0)
+script = ExtResource("1_6ffuc")
+speed = -0.4
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="SpinDir"]
+transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 2, 0)
+visible = false
+light_color = Color(0.266667, 1, 1, 1)
+directional_shadow_mode = 0
+
+[node name="OmniLight3D" type="OmniLight3D" parent="SpinDir"]
+transform = Transform3D(-0.859002, 0, 0.511972, 0, 1, 0, -0.511972, 0, -0.859002, 2.056, -0.52, -0.521)
+light_color = Color(1, 0, 0, 1)
+light_energy = 2.0
+shadow_enabled = true
+omni_range = 3.28
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="SpinDir/OmniLight3D"]
+visible = false
+cast_shadow = 0
+mesh = SubResource("SphereMesh_bshdy")
+
+[node name="UICanvas" type="CanvasLayer" parent="."]
+
+[node name="FPS" type="Label" parent="UICanvas"]
+offset_right = 76.0
+offset_bottom = 23.0
+text = "FPS"
+script = ExtResource("2_6k81c")
