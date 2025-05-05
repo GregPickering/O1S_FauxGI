@@ -13,11 +13,8 @@ config_version=5
 config/name="FauxGI"
 run/main_scene="res://scene_3d.tscn"
 config/features=PackedStringArray("4.4", "GL Compatibility")
-run/delta_smoothing=false
-
-[display]
-
-window/vsync/vsync_mode=0
+boot_splash/show_image=false
+config/icon="uid://b14pus72atr7j"
 
 [rendering]
 

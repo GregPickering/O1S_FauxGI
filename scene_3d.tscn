@@ -1,8 +1,9 @@
-[gd_scene load_steps=8 format=3 uid="uid://btirfsc7rf58b"]
+[gd_scene load_steps=9 format=3 uid="uid://btirfsc7rf58b"]
 
 [ext_resource type="Script" uid="uid://b4hkm2djkjy16" path="res://lighting.gd" id="1_6ffuc"]
 [ext_resource type="Script" uid="uid://d06yfe050b2oh" path="res://camera.gd" id="1_rpp60"]
 [ext_resource type="Script" uid="uid://dpjhlb182qd2e" path="res://fps.gd" id="2_6k81c"]
+[ext_resource type="Script" uid="uid://b74n28fy47qj1" path="res://cb_v_sync.gd" id="5_6ffuc"]
 [ext_resource type="PackedScene" uid="uid://b3vmtf81ju271" path="res://faux_gi.tscn" id="6_rpp60"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_bshdy"]
@@ -57,24 +58,25 @@ material = SubResource("StandardMaterial3D_6ffuc")
 metadata/_edit_group_ = true
 
 [node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(0.528078, 0, 0.849196, 0, 1, 0, -0.849196, 0, 0.528078, 0, 0, 0)
+transform = Transform3D(0.583498, 0, -0.812115, 0, 1, 0, 0.812115, 0, 0.583498, 0, 0, 0)
 script = ExtResource("1_6ffuc")
 speed = 0.5
 
 [node name="SpotLight3D" type="SpotLight3D" parent="SpinSpot"]
 transform = Transform3D(0.952537, 0.131593, -0.274512, 0.304381, -0.396676, 0.866026, 0.00507104, -0.908477, -0.417903, 0.79985, 3.19763, -0.713908)
 light_color = Color(0.192157, 1, 0.32549, 1)
-light_energy = 4.0
+light_energy = 2.0
 shadow_enabled = true
 spot_range = 15.0
 spot_angle = 30.0
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinSpot"]
 transform = Transform3D(-0.128348, 0, -0.991729, 0, 1, 0, 0.991729, 0, -0.128348, -0.711475, 1.74288, -0.629222)
+light_energy = 1.5
 shadow_enabled = true
 
 [node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(0.323267, 0, 0.946308, 0, 1, 0, -0.946308, 0, 0.323267, 0, 0, 0)
+transform = Transform3D(0.0160333, 0, 0.999871, 0, 1, 0, -0.999871, 0, 0.0160333, 0, 0, 0)
 script = ExtResource("1_6ffuc")
 speed = -0.4
 
@@ -87,7 +89,6 @@ directional_shadow_mode = 0
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinDir"]
 transform = Transform3D(-0.859002, 0, 0.511972, 0, 1, 0, -0.511972, 0, -0.859002, 2.056, -0.52, -0.521)
 light_color = Color(1, 0, 0, 1)
-light_energy = 2.0
 shadow_enabled = true
 omni_range = 3.28
 
@@ -103,3 +104,20 @@ offset_right = 76.0
 offset_bottom = 23.0
 text = "FPS"
 script = ExtResource("2_6k81c")
+
+[node name="cbVSync" type="CheckButton" parent="UICanvas"]
+offset_left = 1.0
+offset_top = 29.0
+offset_right = 45.0
+offset_bottom = 53.0
+button_pressed = true
+script = ExtResource("5_6ffuc")
+
+[node name="VSyncLabel" type="Label" parent="UICanvas"]
+offset_left = 52.0
+offset_top = 30.0
+offset_right = 92.0
+offset_bottom = 53.0
+text = "V-Sync"
+
+[connection signal="toggled" from="UICanvas/cbVSync" to="UICanvas/cbVSync" method="_on_toggled"]

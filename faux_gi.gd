@@ -1,8 +1,9 @@
-#@tool
+@tool
 extends Node3D
 ##	Faux Global Illumination
 ##[br][br]
 ##	O1S Gaming
+##	Jonathan Dummer
 ##	(MIT License)
 ##
 ##	Using the existing lights and collision geometry, approximate GI by placing
@@ -12,9 +13,9 @@ extends Node3D
 ##	shadows on the VPLs.
 ##
 ##	Minimal implementation, for each original...
-##		SpotLight3D: itself, +1 VPL
-##		OmniLight3D: itself, +4 VPLs (in a tetrahedron)
-##		DirectionalLight3D: itself, +1 VPL
+##		SpotLight3D: itself, 1+ VPL
+##		OmniLight3D: itself, 1+ VPL
+##		DirectionalLight3D: itself, 1+ VPL
 ##
 ##	While the number of VPLs is limited, we can place and power them using an
 ##	average of multiple raycast samples, so the final results are representative
@@ -35,7 +36,7 @@ extends Node3D
 const VPLs_use_spots : bool = true
 ## How many VPLs to generate per source SpotLight3D, 1+
 const per_spot : int = 1
-## How many VPLs to generate per source OmniLight3D, 4+
+## How many VPLs to generate per source OmniLight3D, 1+ (>= 4 looks good)
 const per_omni : int = 4
 ## How many VPLs to generate per source DirectionalLight3D
 const per_dirl : int = 16
@@ -43,6 +44,8 @@ const per_dirl : int = 16
 const include_shadowless : bool = false
 ## place the VPL (0=at light origin, 1=at intersection)
 const placement_fraction : float = 0.5
+## use real random vectors instead of a repeatable pattern (requires heavy temporal filtering)
+const real_random_jitter : bool = false
 
 ## The node containing all the lights we wish to GI-ify
 @export var top_node : Node3D = null
@@ -50,9 +53,9 @@ const placement_fraction : float = 0.5
 @export_range( 1, 1024 ) var max_points : int = 32
 ## What fraction of energy is preserved each bounce
 @export_range( 0.0, 1.0 ) var bounce_gain : float = 0.25
-## How many raycasts per VPL per _physics_process, 1+
-@export_range( 1, 100 ) var oversample : int = 8
-## Filter the VPLs over time (1=instant, 0=never update)
+## How many raycasts per VPL per _physics_process, 0+
+@export_range( 0, 100 ) var oversample : int = 8
+## Filter the VPLs over time (0=never update/infinite filtering, 1=instant update/no filtering)
 @export_range( 0.01, 1.0 ) var temporal_filter : float = 0.25
 
 # original light sources in the scene
@@ -68,13 +71,13 @@ var active_VPLs : int = 0
 # physics stuff
 var query := PhysicsRayQueryParameters3D.new()
 var space_state : PhysicsDirectSpaceState3D = null
-enum ray_storage { gain, pos, norm, rad }
+enum ray_storage { energy, pos, norm, rad, color }
 
 # I need to raycast, which happens here in the physics process
 func _physics_process( _delta ):
 	active_VPLs = 0
 	allocate_VPLs( max_points )
-	if bounce_gain > 0.01:
+	if bounce_gain >= 0.01:
 		# now run through all active light sources in the scene
 		for light in light_sources:
 			if light.is_visible_in_tree():
@@ -85,72 +88,47 @@ func _physics_process( _delta ):
 					"SpotLight3D": process_spot( light )
 			else:
 				light_data.erase( light )
-		# Do we need a second pass to filter out the top N VPLs?
-		var threshold : float = 0.0
-		if active_VPLs > max_points:
-			threshold = find_better_threshold()
-		# finally add the VPLs
-		active_VPLs = 0
+		# Gather all active VPLs into a convenient array
+		var preVPLs : Array[ Dictionary ] = []
 		for light in light_data:
 			for idx in light_data[ light ]:
-				if light_data[ light ][ idx ][ ray_storage.gain ] > threshold:
-					config(	active_VPLs,
-							light_data[ light ][ idx ][ ray_storage.pos ],
-							light.light_color, 
-							light_data[ light ][ idx ][ ray_storage.gain ], 
-							light_data[ light ][ idx ][ ray_storage.rad ] )
-					active_VPLs += 1
+				if light_data[ light ][ idx ][ ray_storage.energy ] > 0.0:
+					preVPLs.push_back( light_data[ light ][ idx ] )
+					preVPLs.back()[ ray_storage.color ] = light.light_color;
+		# Do we need a second pass to filter out the top N VPLs?
+		if preVPLs.size() > max_points:
+			# keep the most energetic
+			preVPLs.sort_custom( func(a, b): return a[ ray_storage.energy ] > b[ ray_storage.energy ] )
+			preVPLs.resize( max_points )
+		# finally add the VPLs
+		active_VPLs = 0
+		for preVPL in preVPLs:
+			config_VPL(	active_VPLs,
+					preVPL[ ray_storage.pos ],
+					preVPL[ ray_storage.color ], 
+					preVPL[ ray_storage.energy ], 
+					preVPL[ ray_storage.rad ] )
+			active_VPLs += 1
 	else:
 		light_data.clear()
 	# deactivate any VPLs that need it
 	if active_VPLs < last_active_VPLs:
 		for idx in range( active_VPLs, last_active_VPLs ):
-			disable( idx )
+			disable_VPL( idx )
 	if last_active_VPLs != active_VPLs:
 		last_active_VPLs = active_VPLs
 		print( last_active_VPLs, " active VPLs" )
 
-func find_better_threshold() -> float:
-	var res = scan_candidates( 0.0 )
-	var tmax : float = res[ "global_hi" ]
-	# binary search
-	var t := tmax * 0.5
-	var dt := tmax * 0.25
-	for i in 4:
-		res = scan_candidates( t )
-		var delta : int = max_points -  res[ "count" ]
-		if 0 == delta:
-			break
-		t += -dt if (delta > 0) else dt
-	print( t, " -> ", res[ "count" ] )
-	return t
-
-func scan_candidates( thresh : float ) -> Dictionary:
-	var res : Dictionary = {}
-	var lo : float = 1e20
-	var hi : float = -1e20
-	var sum : float = 0.0
-	var global_hi : float = -1e20
-	var count : int = 0
-	for light in light_data:
-		for idx in light_data[ light ]:
-			var v : float = light_data[ light ][ idx ][ ray_storage.gain ]
-			global_hi = max( global_hi, v )
-			if v > thresh:
-				hi = max( hi, v )
-				lo = max( lo, v )
-				sum += v 
-				count += 1
-	res[ "lo" ] = lo
-	res[ "hi" ] = hi
-	if count > 0:
-		res[ "avg" ] = sum / count
-	else:
-		res[ "avg" ] = 0.0
-	res[ "global_hi" ] = global_hi
-	res[ "count" ] = count
-	return res
-
+func process_ray_dummy( from : Vector3, to : Vector3, done_frac : float = 0.5 ) -> Dictionary:
+	var res_light : Dictionary
+	var total_d : float = from.distance_to( to )
+	var done_d : float = total_d * done_frac
+	res_light[ ray_storage.pos ] = lerp( from, to, done_frac * placement_fraction )
+	res_light[ ray_storage.norm ] = to.direction_to( from ) # just say the normal is back along this ray
+	res_light[ ray_storage.rad ] = (total_d - 0.5 * done_d) * 1.25
+	res_light[ ray_storage.energy ] = sqrt( 1.0 - done_frac )
+	return res_light
+	
 func process_ray( from : Vector3, to : Vector3 ) -> Dictionary:
 	var res_light : Dictionary
 	query.from = from
@@ -162,55 +140,66 @@ func process_ray( from : Vector3, to : Vector3 ) -> Dictionary:
 		var done_frac : float = done_d / maxf( total_d, 1e-6 )
 		res_light[ ray_storage.pos ] = lerp( from, to, done_frac * placement_fraction )
 		res_light[ ray_storage.norm ] = res_ray.normal
-		res_light[ ray_storage.rad ] = (total_d - 0.5 * done_d)
-		res_light[ ray_storage.gain ] = sqrt( 1.0 - done_frac )
+		res_light[ ray_storage.rad ] = (total_d - 0.5 * done_d) * 1.25
+		res_light[ ray_storage.energy ] = sqrt( 1.0 - done_frac )
 					#* absf( res_ray.normal.dot( (to - from).normalized() ) )
 	return res_light
 
 func process_rays( from : Vector3, rays : Array[ Vector3 ] ) -> Dictionary:
 	var avg_ray_res : Dictionary
-	var hits : int = 0
 	for ray in rays:
 		var ray_res := process_ray( from, from + ray )
 		if ray_res:
-			if not avg_ray_res:
-				avg_ray_res = ray_res
-				hits = 1
-			else:
-				for key in ray_res:
-					avg_ray_res[ key ] += ray_res[ key ]
-				hits += 1
+			# weight by energy
+			var e = ray_res[ ray_storage.energy ]
+			if e > 0.0:
+				ray_res[ ray_storage.pos ] *= e
+				ray_res[ ray_storage.norm ] *= e
+				ray_res[ ray_storage.rad ] *= e
+				if not avg_ray_res:
+					avg_ray_res = ray_res
+				else:
+					for key in ray_res:
+						avg_ray_res[ key ] += ray_res[ key ]
 	if avg_ray_res:
-		# divide by hits...
-		avg_ray_res[ ray_storage.pos ] /= hits
-		avg_ray_res[ ray_storage.norm ] /= hits
-		avg_ray_res[ ray_storage.rad ] /= hits
-		# except for the energy (gain), which should lose energy if no hits
-		avg_ray_res[ ray_storage.gain ] /= rays.size()
+		# divide by energy
+		var gain = 1.0 / avg_ray_res[ ray_storage.energy ]
+		avg_ray_res[ ray_storage.pos ] *= gain
+		avg_ray_res[ ray_storage.norm ] *= gain
+		avg_ray_res[ ray_storage.rad ] *= gain
+		# and the energy itself is scaled by the number of samples
+		avg_ray_res[ ray_storage.energy ] /= rays.size()
 	return avg_ray_res
 
-func jitter_ray_angle( ray : Vector3, N : int, deg : float ) -> Array[ Vector3 ]:
-	# always start with the original
-	var rays : Array[ Vector3 ] = [ ray ]
+func jitter_ray_angle( ray : Vector3, N : int, deg : float, true_rnd : bool = real_random_jitter ) -> Array[ Vector3 ]:
+	# always start with the original?
+	var rays : Array[ Vector3 ] = [] # [ ray ]
 	# now add others
-	if N > 1:
+	if N > 0:
 		var length : float = -ray.length()
 		var xform := Basis.looking_at( ray, 
 			Vector3.UP if (1 != ray.abs().max_axis_index()) else Vector3.RIGHT )
-		for samp in range( 1, N ):
-			var sample_vec := Vector3.octahedron_decode( 
-				qrnd_distrib( samp, deg / 150.0 ) )
+		for samp in range( 0, N ):
+			var samp_2d : Vector2
+			if true_rnd:
+				samp_2d = Vector2( randf_range(-0.5, 0.5), randf_range(-0.5, 0.5) ) * (deg / 180.0) + Vector2(0.5,0.5)
+			else:
+				samp_2d = qrnd_distrib( samp, deg / 180.0 )
+			var sample_vec := Vector3.octahedron_decode( samp_2d )
 			rays.push_back( (xform * sample_vec) * length )
 	return rays
 
 func process_rays_angle( from : Vector3, to : Vector3, N : int, deg : float ) -> Dictionary:
-	var rays := jitter_ray_angle( to - from, N, deg )
-	return process_rays( from, rays )
+	if N > 0:
+		var rays := jitter_ray_angle( to - from, N, deg )
+		return process_rays( from, rays )
+	else:
+		return process_ray_dummy( from, to, 0.5 )
 
 func update_light_data( light : Light3D, idx : int, data : Dictionary, modulate : float ):
 	if light and data:
 		# scale in the actual light energy here
-		data[ ray_storage.gain ] *= modulate
+		data[ ray_storage.energy ] *= modulate
 		if light_data[ light ].has( idx ):
 			for key in data:
 				light_data[ light ][ idx ][ key ] = lerp( 
@@ -219,7 +208,7 @@ func update_light_data( light : Light3D, idx : int, data : Dictionary, modulate 
 		else:
 			light_data[ light ][ idx ] = data #.duplicate()
 			# do I want the amplitude to fade in?
-			#light_data[ light ][ idx ][ ray_storage.gain ] *= temporal_filter
+			#light_data[ light ][ idx ][ ray_storage.energy ] *= temporal_filter
 	else:
 		light_data[ light ].erase( idx )
 
@@ -235,32 +224,45 @@ func process_light_rays( light : Light3D, rays : Array[ Vector3 ], angle_deg : f
 
 func process_spot( light : Light3D ):
 	var compensate_N_pts : float = 1.0 / per_spot
-	var rays := jitter_ray_angle( -light.spot_range * light.global_basis.z, per_spot, light.spot_angle )
+	# these rays never use real random jitter
+	var rays := jitter_ray_angle( -light.spot_range * light.global_basis.z, 
+									per_spot, light.spot_angle, false )
 	process_light_rays( light, rays, light.spot_angle * sqrt( compensate_N_pts ), 
 		light.light_energy * bounce_gain * 0.1 * compensate_N_pts )
 
 func process_omni( light : Light3D ):
-	# 4 faces of a tetrahedron (bare minimum)
-	const _tds : float = 1.0 / sqrt( 3.0 )
-	const _tet_dirs : Array[ Vector3 ] = [
-				Vector3(1,1,-1) * _tds, Vector3(1,-1,1) * _tds,
-				Vector3(-1,1,1) * _tds, Vector3(-1,-1,-1) * _tds ]
-	# 6 faces of a cube (better, but not awesome)
-	const _cube_dirs : Array[ Vector3 ] = [
-				Vector3(0,0,+1), Vector3(0,0,-1),
-				Vector3(0,+1,0), Vector3(0,-1,0),
-				Vector3(+1,0,0), Vector3(-1,0,0) ]
 	# where do I want to cast rays
 	var rays : Array[ Vector3 ] = []
-	if per_omni < 6:
-		rays.append_array( _tet_dirs )
-	else:
-		rays.append_array( _cube_dirs )
-		if per_omni > 6:
-			# add extras randomly
-			for i in (per_omni - 6):
-				rays.push_back( Vector3.octahedron_decode( 
-						qrnd_distrib( i * 17 + 33 ) ) )
+	match abs( per_omni ):
+		0:	# do nothing
+			return
+		1:	# this is a single point, but if oversample is set to 0, place it at the center
+			rays.append( Vector3.UP )
+		2:	# up and down
+			const _two_dirs : Array[ Vector3 ] = [
+					Vector3(0,+1,0), Vector3(0,-1,0) ]
+			rays.append_array( _two_dirs )
+		3: # 3 points in a plane (no up/down)
+			const _three_dirs : Array[ Vector3 ] = [
+					Vector3(1,0,0), Vector3(-0.6,0,0.8), Vector3(-0.6,0,-0.8) ]
+			rays.append_array( _three_dirs )
+		4, 5: # 4 faces of a tetrahedron, decent
+			const _tds : float = 1.0 / sqrt( 3.0 )
+			const _tet_dirs : Array[ Vector3 ] = [
+					Vector3(1,1,-1) * _tds, Vector3(1,-1,1) * _tds,
+					Vector3(-1,1,1) * _tds, Vector3(-1,-1,-1) * _tds ]
+			rays.append_array( _tet_dirs )
+		_:	# 6 faces of a cube (better), plus more if needed
+			const _cube_dirs : Array[ Vector3 ] = [
+					Vector3(0,0,+1), Vector3(0,0,-1),
+					Vector3(0,+1,0), Vector3(0,-1,0),
+					Vector3(+1,0,0), Vector3(-1,0,0) ]
+			rays.append_array( _cube_dirs )
+			if per_omni > 6:
+				# add extras randomly
+				for i in (per_omni - 6):
+					rays.push_back( Vector3.octahedron_decode( 
+							qrnd_distrib( i * 17 + 33 ) ) )
 	# size the rays correctly
 	for i in rays.size():
 		rays[i] *= light.omni_range
@@ -293,11 +295,11 @@ func _ready():
 		print( "Source count is ", light_sources.size() )
 		print( "VPL max count is ", VPL_light.size() )
 
-func disable( index : int ):
+func disable_VPL( index : int ):
 	if index < VPL_inst.size():
 		RenderingServer.instance_set_visible( VPL_inst[ index ] , false )
 
-func config(	index : int,
+func config_VPL(	index : int,
 				pos : Vector3,
 				color : Color,
 				energy : float,
