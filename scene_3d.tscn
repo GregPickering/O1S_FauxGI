@@ -58,7 +58,7 @@ material = SubResource("StandardMaterial3D_6ffuc")
 metadata/_edit_group_ = true
 
 [node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(0.583498, 0, -0.812115, 0, 1, 0, 0.812115, 0, 0.583498, 0, 0, 0)
+transform = Transform3D(0.946344, 0, 0.32316, 0, 1, 0, -0.32316, 0, 0.946344, 0, 0, 0)
 script = ExtResource("1_6ffuc")
 speed = 0.5
 
@@ -67,7 +67,7 @@ transform = Transform3D(0.952537, 0.131593, -0.274512, 0.304381, -0.396676, 0.86
 light_color = Color(0.192157, 1, 0.32549, 1)
 light_energy = 2.0
 shadow_enabled = true
-spot_range = 15.0
+spot_range = 10.0
 spot_angle = 30.0
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinSpot"]
@@ -76,7 +76,7 @@ light_energy = 1.5
 shadow_enabled = true
 
 [node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(0.0160333, 0, 0.999871, 0, 1, 0, -0.999871, 0, 0.0160333, 0, 0, 0)
+transform = Transform3D(0.749598, 0, -0.661894, 0, 1, 0, 0.661894, 0, 0.749598, 0, 0, 0)
 script = ExtResource("1_6ffuc")
 speed = -0.4
 

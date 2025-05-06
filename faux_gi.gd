@@ -37,13 +37,11 @@ const VPLs_use_spots : bool = true
 ## How many VPLs to generate per source SpotLight3D, 1+
 const per_spot : int = 1
 ## How many VPLs to generate per source OmniLight3D, 1+ (>= 4 looks good)
-const per_omni : int = 4
+const per_omni : int = 1
 ## How many VPLs to generate per source DirectionalLight3D
 const per_dirl : int = 16
 ## Do we want to spawn VPLs for source lights which don't cast shadows?
 const include_shadowless : bool = false
-## place the VPL (0=at light origin, 1=at intersection)
-const placement_fraction : float = 0.5
 ## use real random vectors instead of a repeatable pattern (requires heavy temporal filtering)
 const real_random_jitter : bool = false
 
@@ -57,6 +55,8 @@ const real_random_jitter : bool = false
 @export_range( 0, 100 ) var oversample : int = 8
 ## Filter the VPLs over time (0=never update/infinite filtering, 1=instant update/no filtering)
 @export_range( 0.01, 1.0 ) var temporal_filter : float = 0.25
+## place the VPL (0=at light origin, 1=at intersection)
+@export_range( 0.0, 1.1 ) var placement_fraction : float = 0.5
 
 # original light sources in the scene
 var light_sources : Array[ Light3D ] = []
@@ -71,7 +71,7 @@ var active_VPLs : int = 0
 # physics stuff
 var query := PhysicsRayQueryParameters3D.new()
 var space_state : PhysicsDirectSpaceState3D = null
-enum ray_storage { energy, pos, norm, rad, color }
+enum ray_storage { energy, pos, norm, rad, color, dist_frac }
 
 # I need to raycast, which happens here in the physics process
 func _physics_process( _delta ):
@@ -97,8 +97,24 @@ func _physics_process( _delta ):
 					preVPLs.back()[ ray_storage.color ] = light.light_color;
 		# Do we need a second pass to filter out the top N VPLs?
 		if preVPLs.size() > max_points:
-			# keep the most energetic
+			# sort most to least energetic
 			preVPLs.sort_custom( func(a, b): return a[ ray_storage.energy ] > b[ ray_storage.energy ] )
+			# do I want to average all the lights that will get cut?
+			if true:
+				var avg_VPL : Dictionary = preVPLs[ 0 ]
+				for key in avg_VPL:
+					avg_VPL[ key ] *= 0.0
+				var sum_energy : float = 0.0
+				for idx in range( max_points - 1, preVPLs.size() ):
+					var e : float = preVPLs[ idx ][ ray_storage.energy ]
+					sum_energy += e;
+					for key in preVPLs[ idx ]:
+						avg_VPL[ key ] += preVPLs[ idx ][ key ] * e
+				var gain : float = 1.0 / sum_energy
+				for key in avg_VPL:
+					avg_VPL[ key ] *= gain
+				avg_VPL[ ray_storage.energy ] = sum_energy
+			# just throw away the rest
 			preVPLs.resize( max_points )
 		# finally add the VPLs
 		active_VPLs = 0
@@ -120,6 +136,7 @@ func _physics_process( _delta ):
 		print( last_active_VPLs, " active VPLs" )
 
 func process_ray_dummy( from : Vector3, to : Vector3, done_frac : float = 0.5 ) -> Dictionary:
+	# This function is only called if Oversample is 0, i.e. no raycasts
 	var res_light : Dictionary
 	var total_d : float = from.distance_to( to )
 	var done_d : float = total_d * done_frac
@@ -142,17 +159,19 @@ func process_ray( from : Vector3, to : Vector3 ) -> Dictionary:
 		res_light[ ray_storage.norm ] = res_ray.normal
 		res_light[ ray_storage.rad ] = (total_d - 0.5 * done_d) * 1.25
 		res_light[ ray_storage.energy ] = sqrt( 1.0 - done_frac )
-					#* absf( res_ray.normal.dot( (to - from).normalized() ) )
+					#* absf( res_ray.normal.dot( from.direction_to( to ) ) )
 	return res_light
 
 func process_rays( from : Vector3, rays : Array[ Vector3 ] ) -> Dictionary:
 	var avg_ray_res : Dictionary
+	var sum_energy : float = 0.0
 	for ray in rays:
 		var ray_res := process_ray( from, from + ray )
 		if ray_res:
 			# weight by energy
 			var e = ray_res[ ray_storage.energy ]
 			if e > 0.0:
+				sum_energy += e
 				ray_res[ ray_storage.pos ] *= e
 				ray_res[ ray_storage.norm ] *= e
 				ray_res[ ray_storage.rad ] *= e
@@ -163,15 +182,16 @@ func process_rays( from : Vector3, rays : Array[ Vector3 ] ) -> Dictionary:
 						avg_ray_res[ key ] += ray_res[ key ]
 	if avg_ray_res:
 		# divide by energy
-		var gain = 1.0 / avg_ray_res[ ray_storage.energy ]
+		var gain = 1.0 / sum_energy
 		avg_ray_res[ ray_storage.pos ] *= gain
 		avg_ray_res[ ray_storage.norm ] *= gain
 		avg_ray_res[ ray_storage.rad ] *= gain
 		# and the energy itself is scaled by the number of samples
-		avg_ray_res[ ray_storage.energy ] /= rays.size()
+		avg_ray_res[ ray_storage.energy ] = sum_energy / rays.size()
 	return avg_ray_res
 
-func jitter_ray_angle( ray : Vector3, N : int, deg : float, true_rnd : bool = real_random_jitter ) -> Array[ Vector3 ]:
+func jitter_ray_angle(	ray : Vector3, N : int, deg : float, 
+						true_rnd : bool = real_random_jitter ) -> Array[ Vector3 ]:
 	# always start with the original?
 	var rays : Array[ Vector3 ] = [] # [ ray ]
 	# now add others
@@ -199,7 +219,7 @@ func process_rays_angle( from : Vector3, to : Vector3, N : int, deg : float ) ->
 func update_light_data( light : Light3D, idx : int, data : Dictionary, modulate : float ):
 	if light and data:
 		# scale in the actual light energy here
-		data[ ray_storage.energy ] *= modulate
+		data[ ray_storage.energy ] *= modulate * light.light_indirect_energy
 		if light_data[ light ].has( idx ):
 			for key in data:
 				light_data[ light ][ idx ][ key ] = lerp( 
@@ -236,8 +256,8 @@ func process_omni( light : Light3D ):
 	match abs( per_omni ):
 		0:	# do nothing
 			return
-		1:	# this is a single point, but if oversample is set to 0, place it at the center
-			rays.append( Vector3.UP )
+		1:	# this is a single point
+			rays.append( Vector3.DOWN )
 		2:	# up and down
 			const _two_dirs : Array[ Vector3 ] = [
 					Vector3(0,+1,0), Vector3(0,-1,0) ]
@@ -295,23 +315,6 @@ func _ready():
 		print( "Source count is ", light_sources.size() )
 		print( "VPL max count is ", VPL_light.size() )
 
-func disable_VPL( index : int ):
-	if index < VPL_inst.size():
-		RenderingServer.instance_set_visible( VPL_inst[ index ] , false )
-
-func config_VPL(	index : int,
-				pos : Vector3,
-				color : Color,
-				energy : float,
-				dist : float ):
-	if index < VPL_inst.size():
-		RenderingServer.instance_set_visible( VPL_inst[ index ] , true )
-		RenderingServer.instance_set_transform( VPL_inst[ index ], Transform3D( Basis(), pos ) )
-	if index < VPL_light.size():
-		RenderingServer.light_set_color( VPL_light[ index ], color )
-		RenderingServer.light_set_param( VPL_light[ index ], RenderingServer.LIGHT_PARAM_ENERGY, energy )
-		RenderingServer.light_set_param( VPL_light[ index ], RenderingServer.LIGHT_PARAM_RANGE, dist )
-
 func qrnd_distrib( index : int, scale_01 : float = 1.0 ) -> Vector2:
 	const mid2d := Vector2.ONE * 0.5
 	const golden_2d := 1.32471795724474602596
@@ -342,7 +345,8 @@ func allocate_VPLs( N : int ):
 			# each light needs an instance, attached to the scenario
 			var instance : RID = RenderingServer.instance_create()
 			RenderingServer.instance_set_scenario( instance, scenario )
-			# now create the light and attach it
+			# create and attach the light (each light needs different parameters, 
+			# so we can't just share a single light across multiple instances)
 			var light : RID
 			if spot_instead:
 				light = RenderingServer.spot_light_create()
@@ -357,3 +361,23 @@ func allocate_VPLs( N : int ):
 			# keep a copy around
 			VPL_inst.append( instance )
 			VPL_light.append( light )
+
+func disable_VPL( index : int ):
+	if index < VPL_inst.size():
+		RenderingServer.instance_set_visible( VPL_inst[ index ] , false )
+
+func config_VPL(	index : int,
+					pos : Vector3,
+					color : Color,
+					energy : float,
+					dist : float ):
+	if index < min( VPL_inst.size(), VPL_light.size() ):
+		# instance parameters
+		var inst : RID = VPL_inst[ index ]
+		RenderingServer.instance_set_visible( inst , true )
+		RenderingServer.instance_set_transform( inst, Transform3D( Basis.IDENTITY, pos ) )
+		# light parameters
+		var light : RID = VPL_light[ index ]
+		RenderingServer.light_set_color( light, color )
+		RenderingServer.light_set_param( light, RenderingServer.LIGHT_PARAM_ENERGY, energy )
+		RenderingServer.light_set_param( light, RenderingServer.LIGHT_PARAM_RANGE, dist )
