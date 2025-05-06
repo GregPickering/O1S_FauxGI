@@ -37,7 +37,7 @@ const VPLs_use_spots : bool = true
 ## How many VPLs to generate per source SpotLight3D, 1+
 const per_spot : int = 1
 ## How many VPLs to generate per source OmniLight3D, 1+ (>= 4 looks good)
-const per_omni : int = 1
+const per_omni : int = 6
 ## How many VPLs to generate per source DirectionalLight3D
 const per_dirl : int = 16
 ## Do we want to spawn VPLs for source lights which don't cast shadows?

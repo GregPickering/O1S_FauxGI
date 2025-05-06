@@ -16,10 +16,14 @@ config/features=PackedStringArray("4.4", "GL Compatibility")
 boot_splash/show_image=false
 config/icon="uid://b14pus72atr7j"
 
+[editor]
+
+movie_writer/movie_file="D:/O1S_Gaming/O1S_FauxGI.avi"
+
 [rendering]
 
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 reflections/reflection_atlas/reflection_size=128
-anti_aliasing/screen_space_roughness_limiter/enabled=false
+anti_aliasing/quality/msaa_3d=3
 anti_aliasing/quality/screen_space_aa=1
