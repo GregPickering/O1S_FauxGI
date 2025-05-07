@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3 uid="uid://b3vmtf81ju271"]
 
-[ext_resource type="Script" uid="uid://oosew8x85qnq" path="res://faux_gi.gd" id="1_kxh3g"]
+[ext_resource type="Script" uid="uid://oosew8x85qnq" path="res://O1S_FauxGI/faux_gi.gd" id="1_kxh3g"]
 
 [node name="FauxGI" type="Node3D"]
 script = ExtResource("1_kxh3g")

@@ -1,4 +1,4 @@
-@tool
+#@tool
 extends Node3D
 ##	Faux Global Illumination
 ##[br][br]
@@ -34,33 +34,48 @@ extends Node3D
 
 ## VPLs use omni *AND* spot (180 deg), Compatibility's per-mesh limit is "8 spot + 8 omni"
 const VPLs_use_spots : bool = true
-## How many VPLs to generate per source SpotLight3D, 1+
-const per_spot : int = 1
-## How many VPLs to generate per source OmniLight3D, 1+ (>= 4 looks good)
-const per_omni : int = 6
-## How many VPLs to generate per source DirectionalLight3D
-const per_dirl : int = 16
 ## Do we want to spawn VPLs for source lights which don't cast shadows?
 const include_shadowless : bool = false
 ## use real random vectors instead of a repeatable pattern (requires heavy temporal filtering)
 const real_random_jitter : bool = false
+## scales all light power
+const scale_all_light_energy : float = 0.25
 
 ## The node containing all the lights we wish to GI-ify
 @export var top_node : Node3D = null
 ## Maximum number of point sources we can add to the scene to simulate GI
 @export_range( 1, 1024 ) var max_points : int = 32
 ## What fraction of energy is preserved each bounce
-@export_range( 0.0, 1.0 ) var bounce_gain : float = 0.25
+@export_range( 0.0, 1.0, 0.01 ) var bounce_gain : float = 0.25
 ## How many raycasts per VPL per _physics_process, 0+
 @export_range( 0, 100 ) var oversample : int = 8
 ## Filter the VPLs over time (0=never update/infinite filtering, 1=instant update/no filtering)
-@export_range( 0.01, 1.0 ) var temporal_filter : float = 0.25
+@export_range( 0.01, 1.0, 0.01 ) var temporal_filter : float = 0.25
 ## place the VPL (0=at light origin, 1=at intersection)
-@export_range( 0.0, 1.1 ) var placement_fraction : float = 0.5
+@export_range( 0.0, 1.1, 0.01 ) var placement_fraction : float = 0.5
+## How many VPLs to generate per source SpotLight3D, 1+
+@export_range( 1, 8 ) var per_spot : int = 1:
+		set( value ):
+			per_spot = value
+			light_data_stale = true
+## How many VPLs to generate per source OmniLight3D, 1+ (>= 4 looks good)
+@export_range( 1, 32 ) var per_omni : int = 4:
+		set( value ):
+			per_omni = value
+			light_data_stale = true
+## How many VPLs to generate per source DirectionalLight3D
+@export_range( 1, 128 ) var per_dirl : int = 16:
+		set( value ):
+			per_dirl = value
+			light_data_stale = true
 
 # original light sources in the scene
 var light_sources : Array[ Light3D ] = []
-var light_data : Dictionary
+# keep data per light for temporal smoothing (cascaded exponential filter)
+var light_filter : Dictionary#[ Light3D, Dictionary ]
+var light_data : Dictionary#[ Light3D, Dictionary ]
+# do we need to start fresh with the temporal data?
+var light_data_stale : bool = true
 
 # keep a pool of our Virtual Points Lights
 var VPL_inst : Array[ RID ] = []
@@ -78,15 +93,22 @@ func _physics_process( _delta ):
 	active_VPLs = 0
 	allocate_VPLs( max_points )
 	if bounce_gain >= 0.01:
+		# to I need to refresh all light data?
+		if light_data_stale:
+			light_filter.clear()
+			light_data.clear()
+			light_data_stale = false
 		# now run through all active light sources in the scene
 		for light in light_sources:
 			if light.is_visible_in_tree():
+				light_filter.get_or_add( light, {} )
 				light_data.get_or_add( light, {} )
 				match light.get_class():
 					"DirectionalLight3D": pass
 					"OmniLight3D": process_omni( light )
 					"SpotLight3D": process_spot( light )
 			else:
+				light_filter.erase( light )
 				light_data.erase( light )
 		# Gather all active VPLs into a convenient array
 		var preVPLs : Array[ Dictionary ] = []
@@ -126,6 +148,7 @@ func _physics_process( _delta ):
 					preVPL[ ray_storage.rad ] )
 			active_VPLs += 1
 	else:
+		light_filter.clear()
 		light_data.clear()
 	# deactivate any VPLs that need it
 	if active_VPLs < last_active_VPLs:
@@ -158,8 +181,8 @@ func process_ray( from : Vector3, to : Vector3 ) -> Dictionary:
 		res_light[ ray_storage.pos ] = lerp( from, to, done_frac * placement_fraction )
 		res_light[ ray_storage.norm ] = res_ray.normal
 		res_light[ ray_storage.rad ] = (total_d - 0.5 * done_d) * 1.25
-		res_light[ ray_storage.energy ] = sqrt( 1.0 - done_frac )
-					#* absf( res_ray.normal.dot( from.direction_to( to ) ) )
+		res_light[ ray_storage.energy ] = sqrt( 1.0 - done_frac ) \
+					* absf( res_ray.normal.dot( from.direction_to( to ) ) )
 	return res_light
 
 func process_rays( from : Vector3, rays : Array[ Vector3 ] ) -> Dictionary:
@@ -216,20 +239,31 @@ func process_rays_angle( from : Vector3, to : Vector3, N : int, deg : float ) ->
 	else:
 		return process_ray_dummy( from, to, 0.5 )
 
+# Do I want cascaded exponential filtering?
+
 func update_light_data( light : Light3D, idx : int, data : Dictionary, modulate : float ):
 	if light and data:
 		# scale in the actual light energy here
 		data[ ray_storage.energy ] *= modulate * light.light_indirect_energy
 		if light_data[ light ].has( idx ):
 			for key in data:
+				# Cascaded exponential filter
+				light_filter[ light ][ idx ][ key ] = lerp( 
+						light_filter[ light ][ idx ][ key ],
+						data[ key ], temporal_filter )
 				light_data[ light ][ idx ][ key ] = lerp( 
 						light_data[ light ][ idx ][ key ],
-						data[ key ], temporal_filter )
+						light_filter[ light ][ idx ][ key ], temporal_filter )
+				#light_data[ light ][ idx ][ key ] = lerp( 
+						#light_data[ light ][ idx ][ key ],
+						#data[ key ], temporal_filter )
 		else:
-			light_data[ light ][ idx ] = data #.duplicate()
+			light_filter[ light ][ idx ] = data#.duplicate()
+			light_data[ light ][ idx ] = data#.duplicate()
 			# do I want the amplitude to fade in?
 			#light_data[ light ][ idx ][ ray_storage.energy ] *= temporal_filter
 	else:
+		light_filter[ light ].erase( idx )
 		light_data[ light ].erase( idx )
 
 func process_light_rays( light : Light3D, rays : Array[ Vector3 ], angle_deg : float, modulate : float ):
@@ -241,6 +275,9 @@ func process_light_rays( light : Light3D, rays : Array[ Vector3 ], angle_deg : f
 		if ray_res:
 			update_light_data( light, ray_idx, ray_res, modulate )
 			active_VPLs += 1
+		else:
+			light_filter[ light ].erase( ray_idx )
+			light_data[ light ].erase( ray_idx )
 
 func process_spot( light : Light3D ):
 	var compensate_N_pts : float = 1.0 / per_spot
@@ -248,7 +285,7 @@ func process_spot( light : Light3D ):
 	var rays := jitter_ray_angle( -light.spot_range * light.global_basis.z, 
 									per_spot, light.spot_angle, false )
 	process_light_rays( light, rays, light.spot_angle * sqrt( compensate_N_pts ), 
-		light.light_energy * bounce_gain * 0.1 * compensate_N_pts )
+		light.light_energy * bounce_gain * scale_all_light_energy * compensate_N_pts )
 
 func process_omni( light : Light3D ):
 	# where do I want to cast rays
@@ -290,7 +327,7 @@ func process_omni( light : Light3D ):
 	var compensate_N_pts : float = 1.0 / rays.size()
 	var angle_deg : float = 240.0 * compensate_N_pts
 	process_light_rays( light, rays, angle_deg, 
-			light.light_energy * bounce_gain * 0.1 * compensate_N_pts )
+			light.light_energy * bounce_gain * scale_all_light_energy * compensate_N_pts )
 
 func _ready():
 	# set up for raycasts (which are all in global space)

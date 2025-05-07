@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="FauxGI"
-run/main_scene="res://scene_3d.tscn"
+run/main_scene="res://Scenes/scene_3d.tscn"
 config/features=PackedStringArray("4.4", "GL Compatibility")
 boot_splash/show_image=false
 config/icon="uid://b14pus72atr7j"
@@ -19,6 +19,13 @@ config/icon="uid://b14pus72atr7j"
 [editor]
 
 movie_writer/movie_file="D:/O1S_Gaming/O1S_FauxGI.avi"
+
+[file_customization]
+
+folder_colors={
+"res://O1S_FauxGI/": "orange",
+"res://Scripts/": "teal"
+}
 
 [rendering]
 

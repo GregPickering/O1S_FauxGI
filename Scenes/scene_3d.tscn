@@ -1,11 +1,13 @@
-[gd_scene load_steps=10 format=3 uid="uid://btirfsc7rf58b"]
+[gd_scene load_steps=11 format=3 uid="uid://btirfsc7rf58b"]
 
-[ext_resource type="Script" uid="uid://b4hkm2djkjy16" path="res://lighting.gd" id="1_6ffuc"]
-[ext_resource type="Script" uid="uid://d06yfe050b2oh" path="res://camera.gd" id="1_rpp60"]
-[ext_resource type="Script" uid="uid://dpjhlb182qd2e" path="res://fps.gd" id="2_6k81c"]
-[ext_resource type="Script" uid="uid://b74n28fy47qj1" path="res://cb_v_sync.gd" id="5_6ffuc"]
-[ext_resource type="Script" uid="uid://bu0i1okglx0ic" path="res://faux_gi_status_label.gd" id="6_mv7kb"]
-[ext_resource type="PackedScene" uid="uid://b3vmtf81ju271" path="res://faux_gi.tscn" id="6_rpp60"]
+[ext_resource type="PackedScene" uid="uid://b3vmtf81ju271" path="res://O1S_FauxGI/faux_gi.tscn" id="1_q5cge"]
+[ext_resource type="Script" uid="uid://d06yfe050b2oh" path="res://Scripts/camera.gd" id="2_pjwey"]
+[ext_resource type="Script" uid="uid://b4hkm2djkjy16" path="res://Scripts/spin_lights.gd" id="3_ok1gl"]
+[ext_resource type="Script" uid="uid://dpjhlb182qd2e" path="res://Scripts/fps.gd" id="4_cqamk"]
+[ext_resource type="Script" uid="uid://b74n28fy47qj1" path="res://Scripts/cb_v_sync.gd" id="5_c5wjy"]
+[ext_resource type="Script" uid="uid://bu0i1okglx0ic" path="res://Scripts/faux_gi_status_label.gd" id="6_bn1vk"]
+
+[sub_resource type="Environment" id="Environment_q5cge"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_bshdy"]
 albedo_color = Color(0.428036, 0.395602, 0.919279, 1)
@@ -19,11 +21,15 @@ height = 0.2
 
 [node name="Scene3D" type="Node3D"]
 
-[node name="FauxGI" parent="." instance=ExtResource("6_rpp60")]
+[node name="FauxGI" parent="." instance=ExtResource("1_q5cge")]
+bounce_gain = 1.0
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_q5cge")
 
 [node name="Camera3D" type="Camera3D" parent="."]
 transform = Transform3D(0.538808, -0.388396, 0.747552, 0, 0.887378, 0.461043, -0.842429, -0.248414, 0.478127, 3.0704, 3.96238, 2.2976)
-script = ExtResource("1_rpp60")
+script = ExtResource("2_pjwey")
 
 [node name="Geometry" type="CSGCombiner3D" parent="."]
 use_collision = true
@@ -37,6 +43,13 @@ size = Vector3(6.75, 5.25, 5.75)
 operation = 2
 flip_faces = true
 size = Vector3(6.5, 5, 5.5)
+
+[node name="CSGCylinder3D" type="CSGCylinder3D" parent="Geometry/CSGBox3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.59072, 0)
+operation = 2
+radius = 2.00195
+height = 0.474365
+sides = 18
 
 [node name="CSGTorus3D" type="CSGTorus3D" parent="Geometry"]
 transform = Transform3D(0.629602, -0.550534, 0.548191, 0.658256, 0.752794, 0, -0.412675, 0.36085, 0.836353, 0.501693, 0.64787, -0.303848)
@@ -59,9 +72,9 @@ material = SubResource("StandardMaterial3D_6ffuc")
 metadata/_edit_group_ = true
 
 [node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(0.998843, 0, 0.0480851, 0, 1, 0, -0.0480851, 0, 0.998843, 0, 0, 0)
-script = ExtResource("1_6ffuc")
-speed = 0.5
+transform = Transform3D(-0.984615, 0, 0.174739, 0, 1, 0, -0.174739, 0, -0.984615, 0, 0, 0)
+script = ExtResource("3_ok1gl")
+speed = -0.3
 
 [node name="SpotLight3D" type="SpotLight3D" parent="SpinSpot"]
 transform = Transform3D(0.952537, 0.131593, -0.274512, 0.304381, -0.396676, 0.866026, 0.00507104, -0.908477, -0.417903, 0.79985, 3.19763, -0.713908)
@@ -73,15 +86,12 @@ spot_angle = 30.0
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinSpot"]
 transform = Transform3D(-0.128348, 0, -0.991729, 0, 1, 0, 0.991729, 0, -0.128348, -0.711475, 1.74288, -0.629222)
-visible = false
 light_energy = 1.5
 shadow_enabled = true
 
 [node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(0.878266, 0, -0.478172, 0, 1, 0, 0.478172, 0, 0.878266, 0, 0, 0)
-visible = false
-script = ExtResource("1_6ffuc")
-speed = -0.4
+transform = Transform3D(0.641678, 0, 0.766974, 0, 1, 0, -0.766974, 0, 0.641678, 0, 0, 0)
+script = ExtResource("3_ok1gl")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="SpinDir"]
 transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 2, 0)
@@ -93,7 +103,7 @@ directional_shadow_mode = 0
 transform = Transform3D(-0.859002, 0, 0.511972, 0, 1, 0, -0.511972, 0, -0.859002, 2.056, -0.52, -0.521)
 light_color = Color(1, 0, 0, 1)
 shadow_enabled = true
-omni_range = 3.28
+omni_range = 3.0
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="SpinDir/OmniLight3D"]
 visible = false
@@ -106,7 +116,7 @@ mesh = SubResource("SphereMesh_bshdy")
 offset_right = 76.0
 offset_bottom = 23.0
 text = "FPS"
-script = ExtResource("2_6k81c")
+script = ExtResource("4_cqamk")
 
 [node name="cbVSync" type="CheckButton" parent="UICanvas"]
 offset_left = 1.0
@@ -114,7 +124,7 @@ offset_top = 29.0
 offset_right = 45.0
 offset_bottom = 53.0
 button_pressed = true
-script = ExtResource("5_6ffuc")
+script = ExtResource("5_c5wjy")
 
 [node name="VSyncLabel" type="Label" parent="UICanvas"]
 offset_left = 52.0
@@ -130,7 +140,8 @@ anchor_right = 1.0
 offset_left = -168.0
 offset_bottom = 23.0
 grow_horizontal = 0
+text = "FauxGI Status"
 horizontal_alignment = 1
-script = ExtResource("6_mv7kb")
+script = ExtResource("6_bn1vk")
 
 [connection signal="toggled" from="UICanvas/cbVSync" to="UICanvas/cbVSync" method="_on_toggled"]
