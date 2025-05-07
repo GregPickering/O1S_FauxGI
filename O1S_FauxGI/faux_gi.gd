@@ -1,4 +1,4 @@
-#@tool
+@tool
 extends Node3D
 ##	Faux Global Illumination
 ##[br][br]
@@ -45,6 +45,8 @@ const scale_all_light_energy : float = 0.25
 @export var top_node : Node3D = null
 ## Maximum number of point sources we can add to the scene to simulate GI
 @export_range( 1, 1024 ) var max_points : int = 32
+## Maximum number of point sources we can add to the scene to simulate GI
+@export_range( 1, 32 ) var max_directionals : int = 8
 ## What fraction of energy is preserved each bounce
 @export_range( 0.0, 1.0, 0.01 ) var bounce_gain : float = 0.25
 ## How many raycasts per VPL per _physics_process, 0+
@@ -63,8 +65,9 @@ const scale_all_light_energy : float = 0.25
 		set( value ):
 			per_omni = value
 			light_data_stale = true
-## How many VPLs to generate per source DirectionalLight3D
-@export_range( 1, 128 ) var per_dirl : int = 16:
+## How many VPLs to generate per source DirectionalLight3D, a value of 0 means
+## use Virtual Directional Light (which is a horrible approximation for indoors)
+@export_range( 0, 128 ) var per_dirl : int = 0:
 		set( value ):
 			per_dirl = value
 			light_data_stale = true
@@ -83,6 +86,12 @@ var VPL_light : Array[ RID ] = []
 var last_active_VPLs : int = 0
 var active_VPLs : int = 0
 
+# keep a pool of our Virtual Directional Lights
+var VDL_inst : Array[ RID ] = []
+var VDL_light : Array[ RID ] = []
+var last_active_VDLs : int = 0
+var active_VDLs : int = 0
+
 # physics stuff
 var query := PhysicsRayQueryParameters3D.new()
 var space_state : PhysicsDirectSpaceState3D = null
@@ -91,7 +100,9 @@ enum ray_storage { energy, pos, norm, rad, color, dist_frac }
 # I need to raycast, which happens here in the physics process
 func _physics_process( _delta ):
 	active_VPLs = 0
+	active_VDLs = 0
 	allocate_VPLs( max_points )
+	allocate_VDLs( max_directionals )
 	if bounce_gain >= 0.01:
 		# to I need to refresh all light data?
 		if light_data_stale:
@@ -104,7 +115,7 @@ func _physics_process( _delta ):
 				light_filter.get_or_add( light, {} )
 				light_data.get_or_add( light, {} )
 				match light.get_class():
-					"DirectionalLight3D": pass
+					"DirectionalLight3D": process_dirl( light )
 					"OmniLight3D": process_omni( light )
 					"SpotLight3D": process_spot( light )
 			else:
@@ -157,6 +168,13 @@ func _physics_process( _delta ):
 	if last_active_VPLs != active_VPLs:
 		last_active_VPLs = active_VPLs
 		print( last_active_VPLs, " active VPLs" )
+	# same for VDLs
+	if active_VDLs < last_active_VDLs:
+		for idx in range( active_VDLs, last_active_VDLs ):
+			disable_VDL( idx )
+	if last_active_VDLs != active_VDLs:
+		last_active_VDLs = active_VDLs
+		print( last_active_VDLs, " active VDLs" )
 
 func process_ray_dummy( from : Vector3, to : Vector3, done_frac : float = 0.5 ) -> Dictionary:
 	# This function is only called if Oversample is 0, i.e. no raycasts
@@ -278,6 +296,14 @@ func process_light_rays( light : Light3D, rays : Array[ Vector3 ], angle_deg : f
 		else:
 			light_filter[ light ].erase( ray_idx )
 			light_data[ light ].erase( ray_idx )
+
+func process_dirl( light : Light3D ):
+	if per_dirl < 1:
+		# Place a Virtual Directional Light, instead of VPLs
+		config_VDL( active_VDLs, light.global_basis.z, light.light_color,
+				light.light_energy * light.light_indirect_energy * 
+				scale_all_light_energy * bounce_gain )
+		active_VDLs += 1
 
 func process_spot( light : Light3D ):
 	var compensate_N_pts : float = 1.0 / per_spot
@@ -418,3 +444,48 @@ func config_VPL(	index : int,
 		RenderingServer.light_set_color( light, color )
 		RenderingServer.light_set_param( light, RenderingServer.LIGHT_PARAM_ENERGY, energy )
 		RenderingServer.light_set_param( light, RenderingServer.LIGHT_PARAM_RANGE, dist )
+
+func allocate_VDLs( N : int ):
+	if N != VDL_inst.size():
+		# safety first
+		N = max( 0, min( max_directionals, N ) )
+		print( "VDL count ", VDL_inst.size(), " -> ", N )
+		# do we need to remove some RIDs?
+		while VDL_inst.size() > N:
+			RenderingServer.free_rid( VDL_inst.pop_back() )
+		while VDL_light.size() > N:
+			RenderingServer.free_rid( VDL_light.pop_back() )
+		# do we need to add some RIDs?
+		var scenario = get_world_3d().scenario
+		while VDL_inst.size() < N:
+			# each light needs an instance, attached to the scenario
+			var instance : RID = RenderingServer.instance_create()
+			RenderingServer.instance_set_scenario( instance, scenario )
+			# create and attach the light (each light needs different parameters, 
+			# so we can't just share a single light across multiple instances)
+			var light : RID = RenderingServer.directional_light_create()
+			RenderingServer.instance_set_base( instance, light )
+			# configure any constant parameters here
+			RenderingServer.instance_set_visible( instance , false )
+			RenderingServer.light_set_param( light, RenderingServer.LIGHT_PARAM_SPECULAR, 0.0 )
+			# keep a copy around
+			VDL_inst.append( instance )
+			VDL_light.append( light )
+
+func disable_VDL( index : int ):
+	if index < VDL_inst.size():
+		RenderingServer.instance_set_visible( VDL_inst[ index ] , false )
+
+func config_VDL(	index : int,
+					direction : Vector3,
+					color : Color,
+					energy : float ):
+	if index < min( VDL_inst.size(), VDL_light.size() ):
+		# instance parameters
+		var inst : RID = VDL_inst[ index ]
+		RenderingServer.instance_set_visible( inst , true )
+		RenderingServer.instance_set_transform( inst, Transform3D( Basis.looking_at( direction ), Vector3.ZERO ) )
+		# light parameters
+		var light : RID = VDL_light[ index ]
+		RenderingServer.light_set_color( light, color )
+		RenderingServer.light_set_param( light, RenderingServer.LIGHT_PARAM_ENERGY, energy )

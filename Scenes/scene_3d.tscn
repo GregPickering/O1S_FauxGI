@@ -72,7 +72,7 @@ material = SubResource("StandardMaterial3D_6ffuc")
 metadata/_edit_group_ = true
 
 [node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(-0.984615, 0, 0.174739, 0, 1, 0, -0.174739, 0, -0.984615, 0, 0, 0)
+transform = Transform3D(0.386755, 0, 0.922183, 0, 1, 0, -0.922183, 0, 0.386755, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 speed = -0.3
 
@@ -86,21 +86,26 @@ spot_angle = 30.0
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinSpot"]
 transform = Transform3D(-0.128348, 0, -0.991729, 0, 1, 0, 0.991729, 0, -0.128348, -0.711475, 1.74288, -0.629222)
+visible = false
 light_energy = 1.5
 shadow_enabled = true
 
 [node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(0.641678, 0, 0.766974, 0, 1, 0, -0.766974, 0, 0.641678, 0, 0, 0)
+transform = Transform3D(-0.702713, 0, -0.711473, 0, 1, 0, 0.711473, 0, -0.702713, 0, 0, 0)
 script = ExtResource("3_ok1gl")
+speed = 0.0
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="SpinDir"]
 transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 2, 0)
 visible = false
 light_color = Color(0.266667, 1, 1, 1)
+shadow_enabled = true
 directional_shadow_mode = 0
+directional_shadow_max_distance = 21.3
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinDir"]
 transform = Transform3D(-0.859002, 0, 0.511972, 0, 1, 0, -0.511972, 0, -0.859002, 2.056, -0.52, -0.521)
+visible = false
 light_color = Color(1, 0, 0, 1)
 shadow_enabled = true
 omni_range = 3.0
@@ -137,7 +142,7 @@ text = "V-Sync"
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -168.0
+offset_left = -261.0
 offset_bottom = 23.0
 grow_horizontal = 0
 text = "FauxGI Status"
