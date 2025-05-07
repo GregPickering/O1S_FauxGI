@@ -289,9 +289,9 @@ func jitter_ray_angle(	ray : Vector3, N : int, deg : float,
 		for samp in range( 0, N ):
 			var samp_2d : Vector2
 			if true_rnd:
-				samp_2d = Vector2( randf_range(-0.5, 0.5), randf_range(-0.5, 0.5) ) * (deg / 180.0) + Vector2(0.5,0.5)
+				samp_2d = Vector2( randf_range(-0.5, 0.5), randf_range(-0.5, 0.5) ) * (deg / 120.0) + Vector2(0.5,0.5)
 			else:
-				samp_2d = qrnd_distrib( samp, deg / 180.0 )
+				samp_2d = qrnd_distrib( samp, deg / 120.0 )
 			var sample_vec := Vector3.octahedron_decode( samp_2d )
 			rays.push_back( (xform * sample_vec) * length )
 	return rays
@@ -421,7 +421,7 @@ func process_omni( light : Light3D ):
 		rays[i] *= light.omni_range
 	# do the ray casts
 	var compensate_N_pts : float = 1.0 / rays.size()
-	var angle_deg : float = 240.0 * compensate_N_pts
+	var angle_deg : float = sqrt( 14400.0 * compensate_N_pts )
 	process_light_rays( light, rays, angle_deg, 
 			light.light_energy * bounce_gain * scale_all_light_energy * compensate_N_pts )
 
