@@ -41,20 +41,19 @@ const real_random_jitter : bool = false
 ## scales all light power
 const scale_all_light_energy : float = 0.25
 
+@export_category( "Scene Integration" )
 ## The node containing all the lights we wish to GI-ify
 @export var top_node : Node3D = null
 ## Maximum number of point sources we can add to the scene to simulate GI
 @export_range( 1, 1024 ) var max_points : int = 32
-## Maximum number of point sources we can add to the scene to simulate GI
+## Maximum number of directional sources we can add to the scene to simulate GI
 @export_range( 1, 32 ) var max_directionals : int = 8
 ## What fraction of energy is preserved each bounce
 @export_range( 0.0, 1.0, 0.01 ) var bounce_gain : float = 0.25
-## How many raycasts per VPL per _physics_process, 0+
-@export_range( 0, 100 ) var oversample : int = 8
-## Filter the VPLs over time (0=never update/infinite filtering, 1=instant update/no filtering)
-@export_range( 0.01, 1.0, 0.01 ) var temporal_filter : float = 0.25
-## place the VPL (0=at light origin, 1=at intersection)
-@export_range( 0.0, 1.1, 0.01 ) var placement_fraction : float = 0.5
+## Visualize the raycasts?
+@export var show_raycasts : bool = false
+
+@export_category( "Spot & Omni Lights" )
 ## How many VPLs to generate per source SpotLight3D, 1+
 @export_range( 1, 8 ) var per_spot : int = 1:
 		set( value ):
@@ -65,20 +64,32 @@ const scale_all_light_energy : float = 0.25
 		set( value ):
 			per_omni = value
 			light_data_stale = true
-## How many VPLs to generate per source DirectionalLight3D, a value of 0 means
-## use Virtual Directional Light (which is a horrible approximation for indoors)
-@export_range( 0, 128 ) var per_dirl : int = 0:
-		set( value ):
-			per_dirl = value
-			light_data_stale = true
+## How many raycasts per VPL per _physics_process, 0+
+@export_range( 0, 100 ) var oversample : int = 8
+## Filter the VPLs over time (0=never update/infinite filtering, 1=instant update/no filtering)
+@export_range( 0.01, 1.0, 0.01 ) var temporal_filter : float = 0.25
+## place the VPL (0=at light origin, 1=at intersection)
+@export_range( 0.0, 1.1, 0.01 ) var placement_fraction : float = 0.5
+
+@export_category( "Directional Lights" )
+## Generate a grid of NxN VPLs to approximate all DirectionalLight3D's.  A value
+## of 0 will use Virtual Directional Lights instead (which is a horrible
+## approximation for indoors)
+@export_range( 0, 16 ) var dir_NxN : int = 0
+## Max distance for the placement of directional light bounces
+@export var directional_proximity : float = 5.0
+## Max distance to check for directional light being intercepted
+@export var thickness : float = 10.0
 
 # original light sources in the scene
 var light_sources : Array[ Light3D ] = []
 # keep data per light for temporal smoothing (cascaded exponential filter)
-var light_filter : Dictionary#[ Light3D, Dictionary ]
-var light_data : Dictionary#[ Light3D, Dictionary ]
+var light_filter : Dictionary[ Light3D, Dictionary ]
+var light_data : Dictionary[ Light3D, Dictionary ]
 # do we need to start fresh with the temporal data?
 var light_data_stale : bool = true
+# put all directional lights into a grid
+var light_dir_grid : Array[ Dictionary ]
 
 # keep a pool of our Virtual Points Lights
 var VPL_inst : Array[ RID ] = []
@@ -92,10 +103,17 @@ var VDL_light : Array[ RID ] = []
 var last_active_VDLs : int = 0
 var active_VDLs : int = 0
 
+# know where the camera is
+var _camera : Camera3D = null
+
 # physics stuff
 var query := PhysicsRayQueryParameters3D.new()
 var space_state : PhysicsDirectSpaceState3D = null
 enum ray_storage { energy, pos, norm, rad, color, dist_frac }
+
+# debug raycasts
+var raycast_ends : PackedVector3Array = []
+@onready var draw_rays : ImmediateMesh = $RaycastDebug.mesh
 
 # I need to raycast, which happens here in the physics process
 func _physics_process( _delta ):
@@ -103,7 +121,11 @@ func _physics_process( _delta ):
 	active_VDLs = 0
 	allocate_VPLs( max_points )
 	allocate_VDLs( max_directionals )
+	raycast_ends.clear()
 	if bounce_gain >= 0.01:
+		light_dir_grid.clear()
+		if dir_NxN > 0:
+			light_dir_grid.resize( dir_NxN * dir_NxN )
 		# to I need to refresh all light data?
 		if light_data_stale:
 			light_filter.clear()
@@ -128,6 +150,10 @@ func _physics_process( _delta ):
 				if light_data[ light ][ idx ][ ray_storage.energy ] > 0.0:
 					preVPLs.push_back( light_data[ light ][ idx ] )
 					preVPLs.back()[ ray_storage.color ] = light.light_color;
+		if light_dir_grid:
+			for lg in light_dir_grid:
+				if lg:
+					preVPLs.push_back( lg )
 		# Do we need a second pass to filter out the top N VPLs?
 		if preVPLs.size() > max_points:
 			# sort most to least energetic
@@ -161,6 +187,14 @@ func _physics_process( _delta ):
 	else:
 		light_filter.clear()
 		light_data.clear()
+	# done with raycasts
+	draw_rays.clear_surfaces()
+	if show_raycasts and not raycast_ends.is_empty():
+		draw_rays.surface_begin( Mesh.PRIMITIVE_LINES )
+		draw_rays.surface_set_color( Color.WHITE )
+		for rce in raycast_ends:
+			draw_rays.surface_add_vertex( rce )
+		draw_rays.surface_end()
 	# deactivate any VPLs that need it
 	if active_VPLs < last_active_VPLs:
 		for idx in range( active_VPLs, last_active_VPLs ):
@@ -186,12 +220,25 @@ func process_ray_dummy( from : Vector3, to : Vector3, done_frac : float = 0.5 ) 
 	res_light[ ray_storage.rad ] = (total_d - 0.5 * done_d) * 1.25
 	res_light[ ray_storage.energy ] = sqrt( 1.0 - done_frac )
 	return res_light
-	
-func process_ray( from : Vector3, to : Vector3 ) -> Dictionary:
-	var res_light : Dictionary
+
+func raycast( from : Vector3, to : Vector3 ) -> Dictionary:
+	# do the ray cast
 	query.from = from
 	query.to = to
 	var res_ray := space_state.intersect_ray( query )
+	# draw it?
+	if show_raycasts:
+		raycast_ends.push_back( to_local( from ) )
+		if res_ray:
+			raycast_ends.push_back( to_local( res_ray.position ) )
+		else:
+			raycast_ends.push_back( to_local( to ) )
+	return res_ray
+	
+func process_ray( from : Vector3, to : Vector3 ) -> Dictionary:
+	#
+	var res_light : Dictionary
+	var res_ray := raycast( from, to )
 	if res_ray:
 		var total_d : float = from.distance_to( to )
 		var done_d : float = from.distance_to( res_ray.position )
@@ -238,8 +285,7 @@ func jitter_ray_angle(	ray : Vector3, N : int, deg : float,
 	# now add others
 	if N > 0:
 		var length : float = -ray.length()
-		var xform := Basis.looking_at( ray, 
-			Vector3.UP if (1 != ray.abs().max_axis_index()) else Vector3.RIGHT )
+		var xform := Quaternion( Vector3(0,0,-1), ray )
 		for samp in range( 0, N ):
 			var samp_2d : Vector2
 			if true_rnd:
@@ -298,12 +344,36 @@ func process_light_rays( light : Light3D, rays : Array[ Vector3 ], angle_deg : f
 			light_data[ light ].erase( ray_idx )
 
 func process_dirl( light : Light3D ):
-	if per_dirl < 1:
-		# Place a Virtual Directional Light, instead of VPLs
-		config_VDL( active_VDLs, light.global_basis.z, light.light_color,
-				light.light_energy * light.light_indirect_energy * 
-				scale_all_light_energy * bounce_gain )
+	var dir : Vector3 = light.global_basis.z * -thickness
+	var e : float = (light.light_energy * light.light_indirect_energy * 
+				scale_all_light_energy * bounce_gain)
+	if dir_NxN < 1:
+		# directly place a Virtual Directional Light, instead of VPLs
+		config_VDL( active_VDLs, light.global_basis.z, light.light_color, e )
 		active_VDLs += 1
+	else:
+		e /= dir_NxN * dir_NxN
+		var stride : float = directional_proximity / dir_NxN
+		var center : Vector3 = _camera.global_position + _camera.global_basis * \
+								(Vector3( -0.5, 0, -0.42 - 0.5 ) * directional_proximity)
+		var idx : int = 0
+		for j in dir_NxN:
+			var pt_row : Vector3 = center + _camera.global_basis.z * (j + 0.5) * stride
+			for i in dir_NxN:
+				var pt : Vector3 = pt_row + _camera.global_basis.x * (i + 0.5) * stride
+				var res_ray := raycast( pt - dir, pt + dir )
+				if res_ray:
+					if res_ray.normal.dot( res_ray.position - _camera.global_position ) < 0.0:
+						var vpl : Dictionary = {}
+						vpl[ ray_storage.color ] = light.light_color
+						vpl[ ray_storage.pos ] = res_ray.position
+						vpl[ ray_storage.rad ] = directional_proximity # 2 * stride
+						vpl[ ray_storage.energy ] = e * 10
+						if light_dir_grid[ idx ]:
+							light_dir_grid[ idx ] = vpl
+						else:
+							light_dir_grid[ idx ] = vpl
+				idx += 1
 
 func process_spot( light : Light3D ):
 	var compensate_N_pts : float = 1.0 / per_spot
@@ -356,6 +426,13 @@ func process_omni( light : Light3D ):
 			light.light_energy * bounce_gain * scale_all_light_energy * compensate_N_pts )
 
 func _ready():
+	# grab the camera
+	if Engine.is_editor_hint():
+		# Get EditorInterface this way because it does not exist in a build
+		var editor_interface := Engine.get_singleton( "EditorInterface" )
+		_camera = editor_interface.get_editor_viewport_3d().get_camera_3d()
+	else:
+		_camera = get_viewport().get_camera_3d()
 	# set up for raycasts (which are all in global space)
 	space_state = get_world_3d().direct_space_state
 	# find all possible source lights
@@ -484,7 +561,8 @@ func config_VDL(	index : int,
 		# instance parameters
 		var inst : RID = VDL_inst[ index ]
 		RenderingServer.instance_set_visible( inst , true )
-		RenderingServer.instance_set_transform( inst, Transform3D( Basis.looking_at( direction ), Vector3.ZERO ) )
+		RenderingServer.instance_set_transform( inst, 
+				Transform3D( Quaternion( Vector3(0,0,-1), direction ), Vector3.ZERO ) )
 		# light parameters
 		var light : RID = VDL_light[ index ]
 		RenderingServer.light_set_color( light, color )
