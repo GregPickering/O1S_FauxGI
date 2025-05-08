@@ -112,7 +112,8 @@ var space_state : PhysicsDirectSpaceState3D = null
 enum ray_storage { energy, pos, norm, rad, color, dist_frac }
 
 # debug raycasts
-var raycast_ends : PackedVector3Array = []
+var raycast_hits : PackedVector3Array = []
+var raycast_misses : PackedVector3Array = []
 @onready var draw_rays : ImmediateMesh = $RaycastDebug.mesh
 
 # I need to raycast, which happens here in the physics process
@@ -121,7 +122,8 @@ func _physics_process( _delta ):
 	active_VDLs = 0
 	allocate_VPLs( max_points )
 	allocate_VDLs( max_directionals )
-	raycast_ends.clear()
+	raycast_hits.clear()
+	raycast_misses.clear()
 	if bounce_gain >= 0.01:
 		light_dir_grid.clear()
 		if dir_NxN > 0:
@@ -189,12 +191,19 @@ func _physics_process( _delta ):
 		light_data.clear()
 	# done with raycasts
 	draw_rays.clear_surfaces()
-	if show_raycasts and not raycast_ends.is_empty():
-		draw_rays.surface_begin( Mesh.PRIMITIVE_LINES )
-		draw_rays.surface_set_color( Color.WHITE )
-		for rce in raycast_ends:
-			draw_rays.surface_add_vertex( rce )
-		draw_rays.surface_end()
+	if show_raycasts:
+		if not raycast_hits.is_empty():
+			draw_rays.surface_begin( Mesh.PRIMITIVE_LINES )
+			for rce in raycast_hits:
+				draw_rays.surface_add_vertex( rce )
+			draw_rays.surface_set_color( Color.WHITE )
+			draw_rays.surface_end()
+		if not raycast_misses.is_empty():
+			draw_rays.surface_begin( Mesh.PRIMITIVE_LINES )
+			for rce in raycast_misses:
+				draw_rays.surface_add_vertex( rce )
+			draw_rays.surface_set_color( Color.BLACK )
+			draw_rays.surface_end()
 	# deactivate any VPLs that need it
 	if active_VPLs < last_active_VPLs:
 		for idx in range( active_VPLs, last_active_VPLs ):
@@ -228,11 +237,12 @@ func raycast( from : Vector3, to : Vector3 ) -> Dictionary:
 	var res_ray := space_state.intersect_ray( query )
 	# draw it?
 	if show_raycasts:
-		raycast_ends.push_back( to_local( from ) )
 		if res_ray:
-			raycast_ends.push_back( to_local( res_ray.position ) )
+			raycast_hits.push_back( to_local( from ) )
+			raycast_hits.push_back( to_local( res_ray.position ) )
 		else:
-			raycast_ends.push_back( to_local( to ) )
+			raycast_misses.push_back( to_local( from ) )
+			raycast_misses.push_back( to_local( to ) )
 	return res_ray
 	
 func process_ray( from : Vector3, to : Vector3 ) -> Dictionary:
