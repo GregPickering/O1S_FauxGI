@@ -80,6 +80,9 @@ const scale_all_light_energy : float = 0.25
 @export var directional_proximity : float = 5.0
 ## Max distance to check for directional light being intercepted
 @export var thickness : float = 10.0
+enum DirCastPlane { NONE, X, Y, Z, ADAPT }
+## Cast all directional sample points into a plane
+@export var cast_plane : DirCastPlane = DirCastPlane.ADAPT
 
 # original light sources in the scene
 var light_sources : Array[ Light3D ] = []
@@ -230,11 +233,22 @@ func process_ray_dummy( from : Vector3, to : Vector3, done_frac : float = 0.5 ) 
 	res_light[ ray_storage.energy ] = sqrt( 1.0 - done_frac )
 	return res_light
 
+var collisions : Dictionary = {}
 func raycast( from : Vector3, to : Vector3 ) -> Dictionary:
 	# do the ray cast
 	query.from = from
 	query.to = to
 	var res_ray := space_state.intersect_ray( query )
+	# what did we hit?
+	#if res_ray:
+		## save based on some collision ID
+		#var cid = res_ray.face_index
+		#if not collisions.has( cid ):
+			#collisions[ cid ] = true
+			## and what did we hit?
+			#printt( "Entry " + str( collisions.size() ),
+					#res_ray.collider, res_ray.collider_id, 
+					#res_ray.face_index, res_ray.rid, res_ray.shape )
 	# draw it?
 	if show_raycasts:
 		if res_ray:
@@ -354,7 +368,7 @@ func process_light_rays( light : Light3D, rays : Array[ Vector3 ], angle_deg : f
 			light_data[ light ].erase( ray_idx )
 
 func process_dirl( light : Light3D ):
-	var dir : Vector3 = light.global_basis.z * -thickness
+	var light_dir : Vector3 = light.global_basis.z * -thickness
 	var e : float = (light.light_energy * light.light_indirect_energy * 
 				scale_all_light_energy * bounce_gain)
 	if dir_NxN < 1:
@@ -363,15 +377,28 @@ func process_dirl( light : Light3D ):
 		active_VDLs += 1
 	else:
 		e /= dir_NxN * dir_NxN
+		var offset : float = (dir_NxN - 1.0) * 0.5
+		var center : Vector3 = _camera.global_position - _camera.global_basis.z * directional_proximity * 0.35
+		var sample_basis := Basis()
+		match cast_plane:
+			DirCastPlane.X:
+				sample_basis = Basis( Quaternion( _camera.global_basis.y, Vector3(1,0,0) ) )
+			DirCastPlane.Y:
+				sample_basis = Basis( Quaternion( _camera.global_basis.y, Vector3(0,1,0) ) )
+			DirCastPlane.Z:
+				sample_basis = Basis( Quaternion( _camera.global_basis.y, Vector3(0,0,0) ) )
+			DirCastPlane.ADAPT:
+				sample_basis = Basis( Quaternion( _camera.global_basis.y, light.global_basis.z ) )
+		sample_basis *= _camera.global_basis
 		var stride : float = directional_proximity / dir_NxN
-		var center : Vector3 = _camera.global_position + _camera.global_basis * \
-								(Vector3( -0.5, 0, -0.42 - 0.5 ) * directional_proximity)
+		var stride_i = sample_basis * Vector3( -0.7071, 0, +0.7071 ) * stride
+		var stride_j = sample_basis * Vector3( +0.7071, 0, +0.7071 ) * stride
 		var idx : int = 0
 		for j in dir_NxN:
-			var pt_row : Vector3 = center + _camera.global_basis.z * (j + 0.5) * stride
+			var pt_row : Vector3 = center + (j - offset) * stride_j
 			for i in dir_NxN:
-				var pt : Vector3 = pt_row + _camera.global_basis.x * (i + 0.5) * stride
-				var res_ray := raycast( pt - dir, pt + dir )
+				var pt : Vector3 = pt_row + (i - offset) * stride_i
+				var res_ray := raycast( pt - light_dir, pt + light_dir )
 				if res_ray:
 					if res_ray.normal.dot( res_ray.position - _camera.global_position ) < 0.0:
 						var vpl : Dictionary = {}

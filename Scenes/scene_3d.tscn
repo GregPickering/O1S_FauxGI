@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3 uid="uid://btirfsc7rf58b"]
+[gd_scene load_steps=11 format=3 uid="uid://btirfsc7rf58b"]
 
 [ext_resource type="PackedScene" uid="uid://b3vmtf81ju271" path="res://O1S_FauxGI/faux_gi.tscn" id="1_q5cge"]
 [ext_resource type="Script" uid="uid://d06yfe050b2oh" path="res://Scripts/camera.gd" id="2_pjwey"]
@@ -6,6 +6,7 @@
 [ext_resource type="Script" uid="uid://dpjhlb182qd2e" path="res://Scripts/fps.gd" id="4_cqamk"]
 [ext_resource type="Script" uid="uid://b74n28fy47qj1" path="res://Scripts/cb_v_sync.gd" id="5_c5wjy"]
 [ext_resource type="Script" uid="uid://bu0i1okglx0ic" path="res://Scripts/faux_gi_status_label.gd" id="6_bn1vk"]
+[ext_resource type="Script" uid="uid://h3bi55a3ev55" path="res://Scripts/renderer_label.gd" id="7_pjwey"]
 
 [sub_resource type="Environment" id="Environment_q5cge"]
 tonemap_mode = 3
@@ -69,8 +70,12 @@ transform = Transform3D(0.707107, 0, -0.707107, 0, 1, 0, 0.707107, 0, 0.707107, 
 material = SubResource("StandardMaterial3D_6ffuc")
 metadata/_edit_group_ = true
 
+[node name="CSGBox3D3" type="CSGBox3D" parent="Geometry"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.80649, -0.955527, -2.43044)
+size = Vector3(15.4212, 0.1, 36.4354)
+
 [node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(-0.168192, 0, -0.985754, 0, 1, 0, 0.985754, 0, -0.168192, 0, 0, 0)
+transform = Transform3D(0.960788, 0, -0.277283, 0, 1, 0, 0.277283, 0, 0.960788, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 
 [node name="SpotLight3D" type="SpotLight3D" parent="SpinSpot"]
@@ -83,14 +88,13 @@ spot_angle = 30.0
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinSpot"]
 transform = Transform3D(-0.128348, 0, -0.991729, 0, 1, 0, 0.991729, 0, -0.128348, -0.711475, 1.74288, -0.629222)
-visible = false
 light_energy = 1.5
 shadow_enabled = true
 
 [node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(-0.617899, 0, 0.786258, 0, 1, 0, -0.786258, 0, -0.617899, 0, 0, 0)
+transform = Transform3D(-0.962606, 0, -0.270906, 0, 1, 0, 0.270906, 0, -0.962606, 0, 0, 0)
 script = ExtResource("3_ok1gl")
-speed = -0.3
+speed = -0.25
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="SpinDir"]
 transform = Transform3D(0.982008, -0.188398, 0.0128751, 0.0752052, 0.452719, 0.888476, -0.173216, -0.871523, 0.458742, 0, 2, 0)
@@ -141,5 +145,18 @@ grow_horizontal = 0
 text = "FauxGI Status"
 horizontal_alignment = 1
 script = ExtResource("6_bn1vk")
+
+[node name="RendererLabel" type="Label" parent="UICanvas"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -262.0
+offset_top = 33.0
+offset_right = -1.0
+offset_bottom = 56.0
+grow_horizontal = 0
+text = "Renderer"
+horizontal_alignment = 1
+script = ExtResource("7_pjwey")
 
 [connection signal="toggled" from="UICanvas/cbVSync" to="UICanvas/cbVSync" method="_on_toggled"]
