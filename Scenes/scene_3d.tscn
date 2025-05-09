@@ -22,6 +22,7 @@ albedo_color = Color(1, 0.635294, 0.105882, 1)
 
 [node name="FauxGI" parent="." instance=ExtResource("1_q5cge")]
 bounce_gain = 1.0
+dir_NxN = 2
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_q5cge")
@@ -75,7 +76,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.80649, -0.955527, -2.43044)
 size = Vector3(15.4212, 0.1, 36.4354)
 
 [node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(0.960788, 0, -0.277283, 0, 1, 0, 0.277283, 0, 0.960788, 0, 0, 0)
+transform = Transform3D(-0.988138, 0, -0.153568, 0, 1, 0, 0.153568, 0, -0.988138, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 
 [node name="SpotLight3D" type="SpotLight3D" parent="SpinSpot"]
@@ -92,13 +93,12 @@ light_energy = 1.5
 shadow_enabled = true
 
 [node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(-0.962606, 0, -0.270906, 0, 1, 0, 0.270906, 0, -0.962606, 0, 0, 0)
+transform = Transform3D(-0.580913, 0, -0.813965, 0, 1, 0, 0.813965, 0, -0.580913, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 speed = -0.25
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="SpinDir"]
 transform = Transform3D(0.982008, -0.188398, 0.0128751, 0.0752052, 0.452719, 0.888476, -0.173216, -0.871523, 0.458742, 0, 2, 0)
-visible = false
 light_color = Color(0.266667, 1, 1, 1)
 shadow_enabled = true
 directional_shadow_mode = 0

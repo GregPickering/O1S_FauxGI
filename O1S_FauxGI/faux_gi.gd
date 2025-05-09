@@ -80,9 +80,11 @@ const scale_all_light_energy : float = 0.25
 @export var directional_proximity : float = 5.0
 ## Max distance to check for directional light being intercepted
 @export var thickness : float = 10.0
+## Move the (average) contact point
+@export var shift_contact : float = 0.0
 enum DirCastPlane { NONE, X, Y, Z, ADAPT }
 ## Cast all directional sample points into a plane
-@export var cast_plane : DirCastPlane = DirCastPlane.ADAPT
+@export var cast_plane : DirCastPlane = DirCastPlane.Y
 
 # original light sources in the scene
 var light_sources : Array[ Light3D ] = []
@@ -158,7 +160,8 @@ func _physics_process( _delta ):
 		if light_dir_grid:
 			for lg in light_dir_grid:
 				if lg:
-					preVPLs.push_back( lg )
+					if lg[ ray_storage.energy ] > 0.0:
+						preVPLs.push_back( lg )
 		# Do we need a second pass to filter out the top N VPLs?
 		if preVPLs.size() > max_points:
 			# sort most to least energetic
@@ -259,7 +262,7 @@ func raycast( from : Vector3, to : Vector3 ) -> Dictionary:
 			raycast_misses.push_back( to_local( to ) )
 	return res_ray
 	
-func process_ray( from : Vector3, to : Vector3 ) -> Dictionary:
+func process_single_ray( from : Vector3, to : Vector3 ) -> Dictionary:
 	#
 	var res_light : Dictionary
 	var res_ray := raycast( from, to )
@@ -274,11 +277,11 @@ func process_ray( from : Vector3, to : Vector3 ) -> Dictionary:
 					* absf( res_ray.normal.dot( from.direction_to( to ) ) )
 	return res_light
 
-func process_rays( from : Vector3, rays : Array[ Vector3 ] ) -> Dictionary:
+func process_rays_average( from : Vector3, rays : PackedVector3Array ) -> Dictionary:
 	var avg_ray_res : Dictionary
 	var sum_energy : float = 0.0
 	for ray in rays:
-		var ray_res := process_ray( from, from + ray )
+		var ray_res := process_single_ray( from, from + ray)
 		if ray_res:
 			# weight by energy
 			var e = ray_res[ ray_storage.energy ]
@@ -302,10 +305,29 @@ func process_rays( from : Vector3, rays : Array[ Vector3 ] ) -> Dictionary:
 		avg_ray_res[ ray_storage.energy ] = sum_energy / rays.size()
 	return avg_ray_res
 
+func raycast_average( rays_from_to : PackedVector3Array ) -> Dictionary:
+	var avg_ray_res : Dictionary
+	var hits : int = 0
+	for ray_idx in range( 0, rays_from_to.size(), 2 ):
+		var res_ray := raycast( rays_from_to[ ray_idx ], rays_from_to[ ray_idx + 1 ] )
+		if res_ray:
+			hits += 1
+			if avg_ray_res:
+				avg_ray_res[ ray_storage.pos ] += res_ray.position
+				avg_ray_res[ ray_storage.norm ] += res_ray.normal
+			else:
+				avg_ray_res[ ray_storage.pos ] = res_ray.position
+				avg_ray_res[ ray_storage.norm ] = res_ray.normal
+	if avg_ray_res:
+		avg_ray_res[ ray_storage.energy ] = 2.0 * hits / rays_from_to.size()
+		avg_ray_res[ ray_storage.pos ] /= hits
+		avg_ray_res[ ray_storage.norm ] /= hits
+	return avg_ray_res
+	
 func jitter_ray_angle(	ray : Vector3, N : int, deg : float, 
-						true_rnd : bool = real_random_jitter ) -> Array[ Vector3 ]:
+						true_rnd : bool = real_random_jitter ) -> PackedVector3Array:
 	# always start with the original?
-	var rays : Array[ Vector3 ] = [] # [ ray ]
+	var rays : PackedVector3Array = [] # [ ray ]
 	# now add others
 	if N > 0:
 		var length : float = -ray.length()
@@ -323,12 +345,11 @@ func jitter_ray_angle(	ray : Vector3, N : int, deg : float,
 func process_rays_angle( from : Vector3, to : Vector3, N : int, deg : float ) -> Dictionary:
 	if N > 0:
 		var rays := jitter_ray_angle( to - from, N, deg )
-		return process_rays( from, rays )
+		return process_rays_average( from, rays )
 	else:
 		return process_ray_dummy( from, to, 0.5 )
 
 # Do I want cascaded exponential filtering?
-
 func update_light_data( light : Light3D, idx : int, data : Dictionary, modulate : float ):
 	if light and data:
 		# scale in the actual light energy here
@@ -377,7 +398,7 @@ func process_dirl( light : Light3D ):
 		active_VDLs += 1
 	else:
 		e /= dir_NxN * dir_NxN
-		var offset : float = (dir_NxN - 1.0) * 0.5
+		var offset : float = (dir_NxN - 1.0) * 0.5 + 0.5
 		var center : Vector3 = _camera.global_position - _camera.global_basis.z * directional_proximity * 0.35
 		var sample_basis := Basis()
 		match cast_plane:
@@ -395,21 +416,27 @@ func process_dirl( light : Light3D ):
 		var stride_j = sample_basis * Vector3( +0.7071, 0, +0.7071 ) * stride
 		var idx : int = 0
 		for j in dir_NxN:
-			var pt_row : Vector3 = center + (j - offset) * stride_j
 			for i in dir_NxN:
-				var pt : Vector3 = pt_row + (i - offset) * stride_i
-				var res_ray := raycast( pt - light_dir, pt + light_dir )
+				var rays_from_to : PackedVector3Array = []
+				for samp in oversample:
+					var ij : Vector2 = qrnd_distrib( samp ) + Vector2( i - offset, j - offset )
+					var pt : Vector3 = center + stride_i * ij.x + stride_j * ij.y
+					rays_from_to.push_back( pt - light_dir )
+					rays_from_to.push_back( pt + light_dir )
+				var res_ray := raycast_average( rays_from_to )
 				if res_ray:
-					if res_ray.normal.dot( res_ray.position - _camera.global_position ) < 0.0:
-						var vpl : Dictionary = {}
-						vpl[ ray_storage.color ] = light.light_color
-						vpl[ ray_storage.pos ] = res_ray.position
-						vpl[ ray_storage.rad ] = directional_proximity # 2 * stride
-						vpl[ ray_storage.energy ] = e * 10
-						if light_dir_grid[ idx ]:
-							light_dir_grid[ idx ] = vpl
-						else:
-							light_dir_grid[ idx ] = vpl
+					var norm : Vector3 = res_ray[ ray_storage.norm ]
+					if norm.dot( light.global_basis.z ) > 0.0:
+						#if norm.dot( res_ray[ ray_storage.pos ] - _camera.global_position ) < 0.0:
+						res_ray[ ray_storage.color ] = light.light_color
+						res_ray[ ray_storage.energy ] = e
+						res_ray[ ray_storage.rad ] = directional_proximity
+						res_ray[ ray_storage.pos ] += light.global_basis.z * shift_contact
+						light_dir_grid[ idx ] = res_ray
+					else:
+						# there was a raycast hit, but we don't want the result
+						res_ray[ ray_storage.energy ] = 0
+						light_dir_grid[ idx ] = res_ray
 				idx += 1
 
 func process_spot( light : Light3D ):
