@@ -41,6 +41,9 @@ const real_random_jitter : bool = false
 ## scales all light power
 const scale_all_light_energy : float = 0.25
 
+# are we running in the editor
+var in_editor : bool = Engine.is_editor_hint()
+
 @export_category( "Scene Integration" )
 ## The node containing all the lights we wish to GI-ify
 @export var top_node : Node3D = null
@@ -64,7 +67,7 @@ const scale_all_light_energy : float = 0.25
 		set( value ):
 			per_omni = value
 			light_data_stale = true
-## How many raycasts per VPL per _physics_process, 0+
+## How many raycasts per VPL per _physics_process for spot and omni lights, 0+
 @export_range( 0, 100 ) var oversample : int = 8
 ## Filter the VPLs over time (0=never update/infinite filtering, 1=instant update/no filtering)
 @export_range( 0.01, 1.0, 0.01 ) var temporal_filter : float = 0.25
@@ -72,19 +75,19 @@ const scale_all_light_energy : float = 0.25
 @export_range( 0.0, 1.1, 0.01 ) var placement_fraction : float = 0.5
 
 @export_category( "Directional Lights" )
-## Generate a grid of NxN VPLs to approximate all DirectionalLight3D's.  A value
-## of 0 will use Virtual Directional Lights instead (which is a horrible
-## approximation for indoors)
-@export_range( 0, 16 ) var dir_NxN : int = 0
+## How many shared VPLs to approximate all DirectionalLight3D's.  A value
+## of 0 will use Virtual Directional Lights instead (which is a cheap but
+## horrible approximation for indoors)
+@export_range( 0, 16 ) var per_directional : int = 3:
+		set( value ):
+			per_directional = value
+			light_data_stale = true
+## How many raycasts per VPL per _physics_process for directional lights, 1+
+@export_range( 1, 100 ) var oversample_dir : int = 16
 ## Max distance for the placement of directional light bounces
-@export var directional_proximity : float = 5.0
+@export var directional_proximity : float = 20.0
 ## Max distance to check for directional light being intercepted
-@export var thickness : float = 10.0
-## Move the (average) contact point
-@export var shift_contact : float = 0.0
-enum DirCastPlane { NONE, X, Y, Z, ADAPT }
-## Cast all directional sample points into a plane
-@export var cast_plane : DirCastPlane = DirCastPlane.Y
+@export var thickness : float = 100.0
 
 # original light sources in the scene
 var light_sources : Array[ Light3D ] = []
@@ -94,7 +97,7 @@ var light_data : Dictionary[ Light3D, Dictionary ]
 # do we need to start fresh with the temporal data?
 var light_data_stale : bool = true
 # put all directional lights into a grid
-var light_dir_grid : Array[ Dictionary ]
+var token_directional_light := DirectionalLight3D.new() # don't attach
 
 # keep a pool of our Virtual Points Lights
 var VPL_inst : Array[ RID ] = []
@@ -130,9 +133,7 @@ func _physics_process( _delta ):
 	raycast_hits.clear()
 	raycast_misses.clear()
 	if bounce_gain >= 0.01:
-		light_dir_grid.clear()
-		if dir_NxN > 0:
-			light_dir_grid.resize( dir_NxN * dir_NxN )
+		var active_dir_lights : Array[ DirectionalLight3D ]
 		# to I need to refresh all light data?
 		if light_data_stale:
 			light_filter.clear()
@@ -140,28 +141,27 @@ func _physics_process( _delta ):
 			light_data_stale = false
 		# now run through all active light sources in the scene
 		for light in light_sources:
-			if light.is_visible_in_tree():
+			if light.is_visible_in_tree() and (light.light_energy > 0.0):
 				light_filter.get_or_add( light, {} )
 				light_data.get_or_add( light, {} )
 				match light.get_class():
-					"DirectionalLight3D": process_dirl( light )
+					"DirectionalLight3D": 
+						#process_dirl( light )
+						active_dir_lights.push_back( light )
 					"OmniLight3D": process_omni( light )
 					"SpotLight3D": process_spot( light )
 			else:
 				light_filter.erase( light )
 				light_data.erase( light )
+		# Directional lights
+		handle_all_directional_lights( active_dir_lights )
 		# Gather all active VPLs into a convenient array
 		var preVPLs : Array[ Dictionary ] = []
 		for light in light_data:
 			for idx in light_data[ light ]:
 				if light_data[ light ][ idx ][ ray_storage.energy ] > 0.0:
 					preVPLs.push_back( light_data[ light ][ idx ] )
-					preVPLs.back()[ ray_storage.color ] = light.light_color;
-		if light_dir_grid:
-			for lg in light_dir_grid:
-				if lg:
-					if lg[ ray_storage.energy ] > 0.0:
-						preVPLs.push_back( lg )
+					preVPLs.back()[ ray_storage.color ] = light.light_color
 		# Do we need a second pass to filter out the top N VPLs?
 		if preVPLs.size() > max_points:
 			# sort most to least energetic
@@ -242,16 +242,6 @@ func raycast( from : Vector3, to : Vector3 ) -> Dictionary:
 	query.from = from
 	query.to = to
 	var res_ray := space_state.intersect_ray( query )
-	# what did we hit?
-	#if res_ray:
-		## save based on some collision ID
-		#var cid = res_ray.face_index
-		#if not collisions.has( cid ):
-			#collisions[ cid ] = true
-			## and what did we hit?
-			#printt( "Entry " + str( collisions.size() ),
-					#res_ray.collider, res_ray.collider_id, 
-					#res_ray.face_index, res_ray.rid, res_ray.shape )
 	# draw it?
 	if show_raycasts:
 		if res_ray:
@@ -305,23 +295,31 @@ func process_rays_average( from : Vector3, rays : PackedVector3Array ) -> Dictio
 		avg_ray_res[ ray_storage.energy ] = sum_energy / rays.size()
 	return avg_ray_res
 
-func raycast_average( rays_from_to : PackedVector3Array ) -> Dictionary:
+func raycast_average( rays_from_to : PackedVector3Array, 
+			target : Vector3, look : Vector3, 
+			dist : float ) -> Dictionary:
 	var avg_ray_res : Dictionary
-	var hits : int = 0
+	var sum_score : float = 0.0
 	for ray_idx in range( 0, rays_from_to.size(), 2 ):
 		var res_ray := raycast( rays_from_to[ ray_idx ], rays_from_to[ ray_idx + 1 ] )
 		if res_ray:
-			hits += 1
-			if avg_ray_res:
-				avg_ray_res[ ray_storage.pos ] += res_ray.position
-				avg_ray_res[ ray_storage.norm ] += res_ray.normal
-			else:
-				avg_ray_res[ ray_storage.pos ] = res_ray.position
-				avg_ray_res[ ray_storage.norm ] = res_ray.normal
+			var score : float = lerpf( 1.0, 0.1, clamp( 
+					target.distance_to( res_ray.position ) / dist, 0.0, 1.0 ) )
+			score *= max( 0.0, look.dot( res_ray.position - target ) )
+			if (score > 0.0) and (look.dot( res_ray.normal ) < 0.0):
+				sum_score += score
+				if avg_ray_res:
+					avg_ray_res[ ray_storage.pos ] += res_ray.position * score
+					avg_ray_res[ ray_storage.norm ] += res_ray.normal * score
+				else:
+					avg_ray_res[ ray_storage.pos ] = res_ray.position * score
+					avg_ray_res[ ray_storage.norm ] = res_ray.normal * score
 	if avg_ray_res:
-		avg_ray_res[ ray_storage.energy ] = 2.0 * hits / rays_from_to.size()
-		avg_ray_res[ ray_storage.pos ] /= hits
-		avg_ray_res[ ray_storage.norm ] /= hits
+		avg_ray_res[ ray_storage.energy ] = 2.0 * sum_score / rays_from_to.size()
+		avg_ray_res[ ray_storage.pos ] /= sum_score
+		avg_ray_res[ ray_storage.norm ] /= sum_score
+		# debug
+		$DirCastDebug.global_position = avg_ray_res[ ray_storage.pos ]
 	return avg_ray_res
 	
 func jitter_ray_angle(	ray : Vector3, N : int, deg : float, 
@@ -341,6 +339,44 @@ func jitter_ray_angle(	ray : Vector3, N : int, deg : float,
 			var sample_vec := Vector3.octahedron_decode( samp_2d )
 			rays.push_back( (xform * sample_vec) * length )
 	return rays
+
+var cached_omni_rays : PackedVector3Array = []
+func distribute_omni_rays( N : int ) -> PackedVector3Array:
+	if N != cached_omni_rays.size():
+		cached_omni_rays.clear()
+		match abs( N ):
+			0:	# do nothing
+				pass
+			1:	# this is a single point
+				cached_omni_rays.append( Vector3.DOWN )
+			2:	# up and down
+				const _two_dirs : Array[ Vector3 ] = [
+						Vector3(0,+1,0), Vector3(0,-1,0) ]
+				cached_omni_rays.append_array( _two_dirs )
+			3: # 3 points in a plane (no up/down)
+				const _three_dirs : Array[ Vector3 ] = [
+						Vector3(1,0,0), Vector3(-0.6,0,0.8), Vector3(-0.6,0,-0.8) ]
+				cached_omni_rays.append_array( _three_dirs )
+			4, 5: # 4 faces of a tetrahedron, decent
+				const _tds : float = 1.0 / sqrt( 3.0 )
+				const _tet_dirs : Array[ Vector3 ] = [
+						Vector3(1,1,-1) * _tds, Vector3(1,-1,1) * _tds,
+						Vector3(-1,1,1) * _tds, Vector3(-1,-1,-1) * _tds ]
+				cached_omni_rays.append_array( _tet_dirs )
+				if N == 5:
+					cached_omni_rays.append( Vector3.ONE )
+			_:	# 6 faces of a cube (better), plus more if needed
+				const _cube_dirs : Array[ Vector3 ] = [
+						Vector3(0,0,+1), Vector3(0,0,-1),
+						Vector3(0,+1,0), Vector3(0,-1,0),
+						Vector3(+1,0,0), Vector3(-1,0,0) ]
+				cached_omni_rays.append_array( _cube_dirs )
+				if N > 6:
+					# add extras randomly
+					for i in (N - 6):
+						cached_omni_rays.push_back( Vector3.octahedron_decode( 
+								qrnd_distrib( i * 17 + 33 ) ) )
+	return cached_omni_rays.duplicate()
 
 func process_rays_angle( from : Vector3, to : Vector3, N : int, deg : float ) -> Dictionary:
 	if N > 0:
@@ -375,7 +411,7 @@ func update_light_data( light : Light3D, idx : int, data : Dictionary, modulate 
 		light_filter[ light ].erase( idx )
 		light_data[ light ].erase( idx )
 
-func process_light_rays( light : Light3D, rays : Array[ Vector3 ], angle_deg : float, modulate : float ):
+func process_light_rays( light : Light3D, rays : PackedVector3Array, angle_deg : float, modulate : float ):
 	for ray_idx in rays.size():
 		var ray_res := process_rays_angle( 
 						light.global_position, 
@@ -388,56 +424,77 @@ func process_light_rays( light : Light3D, rays : Array[ Vector3 ], angle_deg : f
 			light_filter[ light ].erase( ray_idx )
 			light_data[ light ].erase( ray_idx )
 
-func process_dirl( light : Light3D ):
-	var light_dir : Vector3 = light.global_basis.z * -thickness
+func process_directional_light_rays(	lights : Array[ DirectionalLight3D ], 
+										base_rays : PackedVector3Array, 
+										angle_deg : float, modulate : float ):
+	for ray_idx in base_rays.size():
+		# oversample each base ray
+		var N : int = max( 1, oversample_dir )
+		var sum_color : Color = Color()
+		var sum_position := Vector3.ZERO
+		var sum_normal := Vector3.ZERO
+		var sum_energy : float = 0.0
+		var rays := jitter_ray_angle( base_rays[ ray_idx ], N, angle_deg )
+		for ray in rays:
+			# I don't want these raycasts draw, even in debug
+			query.from = _camera.global_position
+			query.to = _camera.global_position + ray
+			var res := space_state.intersect_ray( query )
+			if res:
+				var norm : Vector3 = res.normal
+				# we hit something, now see if the directional lights can hit it too
+				for light in lights:
+					var e : float = norm.dot( light.global_basis.z ) * light.light_energy
+					if e > 0.0:
+						# do a raycast to make sure the directional light doesn't hit anything
+						var pos : Vector3 = lerp( _camera.global_position, res.position, 0.75 )
+						if not raycast(		pos + light.global_basis.z * thickness, 
+											pos + light.global_basis.z * 0.001 ):
+							sum_energy += e
+							sum_color += light.light_color * e
+							sum_position += pos * e
+							sum_normal += norm * e
+		if sum_energy > 0.0:
+			var light_entry : Dictionary = {}
+			light_entry[ ray_storage.energy ] = sum_energy
+			light_entry[ ray_storage.pos ] = sum_position / sum_energy
+			light_entry[ ray_storage.norm ] = sum_normal / sum_energy
+			light_entry[ ray_storage.color ] = sum_color / sum_energy
+			light_entry[ ray_storage.rad ] = directional_proximity
+			update_light_data( token_directional_light, ray_idx, light_entry, modulate / N )
+			active_VPLs += 1
+		else:
+			light_filter[ token_directional_light ].erase( ray_idx )
+			light_data[ token_directional_light ].erase( ray_idx )
+
+func handle_all_directional_lights( lights : Array[ DirectionalLight3D ] ):
+	# like an omnilight, cast rays from the camera
+	if lights:
+		if per_directional > 0:
+			light_filter.get_or_add( token_directional_light, {} )
+			light_data.get_or_add( token_directional_light, {} )
+			
+			var rays := distribute_omni_rays( per_directional )
+			for i in rays.size():
+				rays[i] *= directional_proximity
+			# do the ray casts
+			var compensate_N_pts : float = 1.0 / rays.size()
+			var angle_deg : float = sqrt( 14400.0 * compensate_N_pts )
+			process_directional_light_rays( lights, rays, angle_deg, 
+							bounce_gain * scale_all_light_energy * compensate_N_pts )
+		else:
+			for light in lights:
+				trivial_directional( light )
+	else:
+		light_filter.erase( token_directional_light )
+		light_data.erase( token_directional_light )
+
+func trivial_directional( light : Light3D ):
 	var e : float = (light.light_energy * light.light_indirect_energy * 
 				scale_all_light_energy * bounce_gain)
-	if dir_NxN < 1:
-		# directly place a Virtual Directional Light, instead of VPLs
-		config_VDL( active_VDLs, light.global_basis.z, light.light_color, e )
-		active_VDLs += 1
-	else:
-		e /= dir_NxN * dir_NxN
-		var offset : float = (dir_NxN - 1.0) * 0.5 + 0.5
-		var center : Vector3 = _camera.global_position - _camera.global_basis.z * directional_proximity * 0.35
-		var sample_basis := Basis()
-		match cast_plane:
-			DirCastPlane.X:
-				sample_basis = Basis( Quaternion( _camera.global_basis.y, Vector3(1,0,0) ) )
-			DirCastPlane.Y:
-				sample_basis = Basis( Quaternion( _camera.global_basis.y, Vector3(0,1,0) ) )
-			DirCastPlane.Z:
-				sample_basis = Basis( Quaternion( _camera.global_basis.y, Vector3(0,0,0) ) )
-			DirCastPlane.ADAPT:
-				sample_basis = Basis( Quaternion( _camera.global_basis.y, light.global_basis.z ) )
-		sample_basis *= _camera.global_basis
-		var stride : float = directional_proximity / dir_NxN
-		var stride_i = sample_basis * Vector3( -0.7071, 0, +0.7071 ) * stride
-		var stride_j = sample_basis * Vector3( +0.7071, 0, +0.7071 ) * stride
-		var idx : int = 0
-		for j in dir_NxN:
-			for i in dir_NxN:
-				var rays_from_to : PackedVector3Array = []
-				for samp in oversample:
-					var ij : Vector2 = qrnd_distrib( samp ) + Vector2( i - offset, j - offset )
-					var pt : Vector3 = center + stride_i * ij.x + stride_j * ij.y
-					rays_from_to.push_back( pt - light_dir )
-					rays_from_to.push_back( pt + light_dir )
-				var res_ray := raycast_average( rays_from_to )
-				if res_ray:
-					var norm : Vector3 = res_ray[ ray_storage.norm ]
-					if norm.dot( light.global_basis.z ) > 0.0:
-						#if norm.dot( res_ray[ ray_storage.pos ] - _camera.global_position ) < 0.0:
-						res_ray[ ray_storage.color ] = light.light_color
-						res_ray[ ray_storage.energy ] = e
-						res_ray[ ray_storage.rad ] = directional_proximity
-						res_ray[ ray_storage.pos ] += light.global_basis.z * shift_contact
-						light_dir_grid[ idx ] = res_ray
-					else:
-						# there was a raycast hit, but we don't want the result
-						res_ray[ ray_storage.energy ] = 0
-						light_dir_grid[ idx ] = res_ray
-				idx += 1
+	# directly place a Virtual Directional Light, instead of VPLs
+	config_VDL( active_VDLs, light.global_basis.z, light.light_color, e )
+	active_VDLs += 1
 
 func process_spot( light : Light3D ):
 	var compensate_N_pts : float = 1.0 / per_spot
@@ -448,39 +505,8 @@ func process_spot( light : Light3D ):
 		light.light_energy * bounce_gain * scale_all_light_energy * compensate_N_pts )
 
 func process_omni( light : Light3D ):
-	# where do I want to cast rays
-	var rays : Array[ Vector3 ] = []
-	match abs( per_omni ):
-		0:	# do nothing
-			return
-		1:	# this is a single point
-			rays.append( Vector3.DOWN )
-		2:	# up and down
-			const _two_dirs : Array[ Vector3 ] = [
-					Vector3(0,+1,0), Vector3(0,-1,0) ]
-			rays.append_array( _two_dirs )
-		3: # 3 points in a plane (no up/down)
-			const _three_dirs : Array[ Vector3 ] = [
-					Vector3(1,0,0), Vector3(-0.6,0,0.8), Vector3(-0.6,0,-0.8) ]
-			rays.append_array( _three_dirs )
-		4, 5: # 4 faces of a tetrahedron, decent
-			const _tds : float = 1.0 / sqrt( 3.0 )
-			const _tet_dirs : Array[ Vector3 ] = [
-					Vector3(1,1,-1) * _tds, Vector3(1,-1,1) * _tds,
-					Vector3(-1,1,1) * _tds, Vector3(-1,-1,-1) * _tds ]
-			rays.append_array( _tet_dirs )
-		_:	# 6 faces of a cube (better), plus more if needed
-			const _cube_dirs : Array[ Vector3 ] = [
-					Vector3(0,0,+1), Vector3(0,0,-1),
-					Vector3(0,+1,0), Vector3(0,-1,0),
-					Vector3(+1,0,0), Vector3(-1,0,0) ]
-			rays.append_array( _cube_dirs )
-			if per_omni > 6:
-				# add extras randomly
-				for i in (per_omni - 6):
-					rays.push_back( Vector3.octahedron_decode( 
-							qrnd_distrib( i * 17 + 33 ) ) )
-	# size the rays correctly
+	# where do I want to cast rays, and size them correctly
+	var rays := distribute_omni_rays( per_omni )
 	for i in rays.size():
 		rays[i] *= light.omni_range
 	# do the ray casts
@@ -491,7 +517,7 @@ func process_omni( light : Light3D ):
 
 func _ready():
 	# grab the camera
-	if Engine.is_editor_hint():
+	if in_editor:
 		# Get EditorInterface this way because it does not exist in a build
 		var editor_interface := Engine.get_singleton( "EditorInterface" )
 		_camera = editor_interface.get_editor_viewport_3d().get_camera_3d()
