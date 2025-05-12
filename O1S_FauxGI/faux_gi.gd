@@ -36,10 +36,11 @@ extends Node3D
 const VPLs_use_spots : bool = true
 ## Do we want to spawn VPLs for source lights which don't cast shadows?
 const include_shadowless : bool = false
-## use real random vectors instead of a repeatable pattern (requires heavy temporal filtering)
-const real_random_jitter : bool = false
 ## scales all light power
 const scale_all_light_energy : float = 0.25
+## the colors for visualizing raycasts
+const ray_hit_color := Color.LIGHT_GREEN
+const ray_miss_color := Color.LIGHT_CORAL
 
 # are we running in the editor
 var in_editor : bool = Engine.is_editor_hint()
@@ -47,25 +48,27 @@ var in_editor : bool = Engine.is_editor_hint()
 @export_category( "Scene Integration" )
 ## The node containing all the lights we wish to GI-ify
 @export var top_node : Node3D = null
-## Maximum number of point sources we can add to the scene to simulate GI
-@export_range( 1, 1024 ) var max_points : int = 32
+## Maximum number of Virtual Point Lights we can add to the scene to simulate GI
+@export_range( 1, 1024 ) var max_vpls : int = 32
 ## Maximum number of directional sources we can add to the scene to simulate GI
 @export_range( 1, 32 ) var max_directionals : int = 8
 ## What fraction of energy is preserved each bounce
 @export_range( 0.0, 1.0, 0.01 ) var bounce_gain : float = 0.25
+## Use real random vectors instead of a repeatable pattern (requires heavy temporal filtering)
+@export var real_random_jitter : bool = false
 ## Visualize the raycasts?
 @export var show_raycasts : bool = false
 
 @export_category( "Spot & Omni Lights" )
 ## How many VPLs to generate per source SpotLight3D, 1+
-@export_range( 1, 8 ) var per_spot : int = 1:
+@export_range( 1, 8 ) var vpls_per_spot : int = 1:
 		set( value ):
-			per_spot = value
+			vpls_per_spot = value
 			light_data_stale = true
 ## How many VPLs to generate per source OmniLight3D, 1+ (>= 4 looks good)
-@export_range( 1, 32 ) var per_omni : int = 4:
+@export_range( 1, 32 ) var vpls_per_omni : int = 4:
 		set( value ):
-			per_omni = value
+			vpls_per_omni = value
 			light_data_stale = true
 ## How many raycasts per VPL per _physics_process for spot and omni lights, 0+
 @export_range( 0, 100 ) var oversample : int = 8
@@ -76,14 +79,19 @@ var in_editor : bool = Engine.is_editor_hint()
 
 @export_category( "Directional Lights" )
 ## How many shared VPLs to approximate all DirectionalLight3D's.  A value
-## of 0 will use Virtual Directional Lights instead (which is a cheap but
-## horrible approximation for indoors)
-@export_range( 0, 16 ) var per_directional : int = 3:
+## of 0 will use a Virtual Directional Light per source instead (which is 
+## a cheap but horrible approximation for indoors)
+@export_range( 0, 16 ) var directional_vpls : int = 1:
 		set( value ):
-			per_directional = value
+			directional_vpls = value
 			light_data_stale = true
 ## How many raycasts per VPL per _physics_process for directional lights, 1+
 @export_range( 1, 100 ) var oversample_dir : int = 16
+## Do we want one additional VPL in the camera's looking vector? 0=no
+@export var add_looking_VPL : bool = true:
+		set( value ):
+			add_looking_VPL = value
+			light_data_stale = true
 ## Max distance for the placement of directional light bounces
 @export var directional_proximity : float = 20.0
 ## Max distance to check for directional light being intercepted
@@ -128,7 +136,7 @@ var raycast_misses : PackedVector3Array = []
 func _physics_process( _delta ):
 	active_VPLs = 0
 	active_VDLs = 0
-	allocate_VPLs( max_points )
+	allocate_VPLs( max_vpls )
 	allocate_VDLs( max_directionals )
 	raycast_hits.clear()
 	raycast_misses.clear()
@@ -163,7 +171,7 @@ func _physics_process( _delta ):
 					preVPLs.push_back( light_data[ light ][ idx ] )
 					preVPLs.back()[ ray_storage.color ] = light.light_color
 		# Do we need a second pass to filter out the top N VPLs?
-		if preVPLs.size() > max_points:
+		if preVPLs.size() > max_vpls:
 			# sort most to least energetic
 			preVPLs.sort_custom( func(a, b): return a[ ray_storage.energy ] > b[ ray_storage.energy ] )
 			# do I want to average all the lights that will get cut?
@@ -172,7 +180,7 @@ func _physics_process( _delta ):
 				for key in avg_VPL:
 					avg_VPL[ key ] *= 0.0
 				var sum_energy : float = 0.0
-				for idx in range( max_points - 1, preVPLs.size() ):
+				for idx in range( max_vpls - 1, preVPLs.size() ):
 					var e : float = preVPLs[ idx ][ ray_storage.energy ]
 					sum_energy += e;
 					for key in preVPLs[ idx ]:
@@ -182,7 +190,7 @@ func _physics_process( _delta ):
 					avg_VPL[ key ] *= gain
 				avg_VPL[ ray_storage.energy ] = sum_energy
 			# just throw away the rest
-			preVPLs.resize( max_points )
+			preVPLs.resize( max_vpls )
 		# finally add the VPLs
 		active_VPLs = 0
 		for preVPL in preVPLs:
@@ -202,13 +210,13 @@ func _physics_process( _delta ):
 			draw_rays.surface_begin( Mesh.PRIMITIVE_LINES )
 			for rce in raycast_hits:
 				draw_rays.surface_add_vertex( rce )
-			draw_rays.surface_set_color( Color.WHITE )
+			draw_rays.surface_set_color( ray_hit_color )
 			draw_rays.surface_end()
 		if not raycast_misses.is_empty():
 			draw_rays.surface_begin( Mesh.PRIMITIVE_LINES )
 			for rce in raycast_misses:
 				draw_rays.surface_add_vertex( rce )
-			draw_rays.surface_set_color( Color.BLACK )
+			draw_rays.surface_set_color( ray_miss_color )
 			draw_rays.surface_end()
 	# deactivate any VPLs that need it
 	if active_VPLs < last_active_VPLs:
@@ -344,6 +352,7 @@ var cached_omni_rays : PackedVector3Array = []
 func distribute_omni_rays( N : int ) -> PackedVector3Array:
 	if N != cached_omni_rays.size():
 		cached_omni_rays.clear()
+		var remaining : int = 0
 		match abs( N ):
 			0:	# do nothing
 				pass
@@ -363,19 +372,27 @@ func distribute_omni_rays( N : int ) -> PackedVector3Array:
 						Vector3(1,1,-1) * _tds, Vector3(1,-1,1) * _tds,
 						Vector3(-1,1,1) * _tds, Vector3(-1,-1,-1) * _tds ]
 				cached_omni_rays.append_array( _tet_dirs )
-				if N == 5:
+				if N > 4:
 					cached_omni_rays.append( Vector3.ONE )
-			_:	# 6 faces of a cube (better), plus more if needed
+			6, 7: # 6 faces of a cube (better), plus more if needed
 				const _cube_dirs : Array[ Vector3 ] = [
 						Vector3(0,0,+1), Vector3(0,0,-1),
 						Vector3(0,+1,0), Vector3(0,-1,0),
 						Vector3(+1,0,0), Vector3(-1,0,0) ]
 				cached_omni_rays.append_array( _cube_dirs )
-				if N > 6:
-					# add extras randomly
-					for i in (N - 6):
-						cached_omni_rays.push_back( Vector3.octahedron_decode( 
-								qrnd_distrib( i * 17 + 33 ) ) )
+				# add extras randomly
+				remaining = N - 6
+			_:	# 8 points of a cube, plus extra
+				for i in range(-1,2,2): # -1,1
+					for j in range(-1,2,2): # -1,1
+						for k in range(-1,2,2): # -1,1
+							cached_omni_rays.append( Vector3(i,j,k).normalized() )
+				# add extras randomly
+				remaining = N - 8
+		# we we need any extra?
+		for i in remaining:
+			cached_omni_rays.push_back( Vector3.octahedron_decode( 
+										qrnd_distrib( i * 17 + 33 ) ) )
 	return cached_omni_rays.duplicate()
 
 func process_rays_angle( from : Vector3, to : Vector3, N : int, deg : float ) -> Dictionary:
@@ -385,31 +402,29 @@ func process_rays_angle( from : Vector3, to : Vector3, N : int, deg : float ) ->
 	else:
 		return process_ray_dummy( from, to, 0.5 )
 
-# Do I want cascaded exponential filtering?
 func update_light_data( light : Light3D, idx : int, data : Dictionary, modulate : float ):
-	if light and data:
-		# scale in the actual light energy here
-		data[ ray_storage.energy ] *= modulate * light.light_indirect_energy
-		if light_data[ light ].has( idx ):
-			for key in data:
-				# Cascaded exponential filter
-				light_filter[ light ][ idx ][ key ] = lerp( 
-						light_filter[ light ][ idx ][ key ],
-						data[ key ], temporal_filter )
-				light_data[ light ][ idx ][ key ] = lerp( 
-						light_data[ light ][ idx ][ key ],
-						light_filter[ light ][ idx ][ key ], temporal_filter )
-				#light_data[ light ][ idx ][ key ] = lerp( 
-						#light_data[ light ][ idx ][ key ],
-						#data[ key ], temporal_filter )
+	if light:
+		if data:
+			# scale in the actual light energy here
+			data[ ray_storage.energy ] *= modulate * light.light_indirect_energy
+			if light_data[ light ].has( idx ):
+				for key in data:
+					# Cascaded exponential filter
+					light_filter[ light ][ idx ][ key ] = lerp( 
+							light_filter[ light ][ idx ][ key ],
+							data[ key ], temporal_filter )
+					light_data[ light ][ idx ][ key ] = lerp( 
+							light_data[ light ][ idx ][ key ],
+							light_filter[ light ][ idx ][ key ], temporal_filter )
+			else:
+				light_filter[ light ][ idx ] = data#.duplicate()
+				light_data[ light ][ idx ] = data#.duplicate()
+				# do I want the amplitude to fade in?
+				light_filter[ light ][ idx ][ ray_storage.energy ] *= temporal_filter
+				light_data[ light ][ idx ][ ray_storage.energy ] *= temporal_filter * temporal_filter
 		else:
-			light_filter[ light ][ idx ] = data#.duplicate()
-			light_data[ light ][ idx ] = data#.duplicate()
-			# do I want the amplitude to fade in?
-			#light_data[ light ][ idx ][ ray_storage.energy ] *= temporal_filter
-	else:
-		light_filter[ light ].erase( idx )
-		light_data[ light ].erase( idx )
+			light_filter[ light ].erase( idx )
+			light_data[ light ].erase( idx )
 
 func process_light_rays( light : Light3D, rays : PackedVector3Array, angle_deg : float, modulate : float ):
 	for ray_idx in rays.size():
@@ -427,6 +442,8 @@ func process_light_rays( light : Light3D, rays : PackedVector3Array, angle_deg :
 func process_directional_light_rays(	lights : Array[ DirectionalLight3D ], 
 										base_rays : PackedVector3Array, 
 										angle_deg : float, modulate : float ):
+	# the first ray may be special
+	var jitter_angle : float = 60.0 if add_looking_VPL else angle_deg
 	for ray_idx in base_rays.size():
 		# oversample each base ray
 		var N : int = max( 1, oversample_dir )
@@ -434,7 +451,8 @@ func process_directional_light_rays(	lights : Array[ DirectionalLight3D ],
 		var sum_position := Vector3.ZERO
 		var sum_normal := Vector3.ZERO
 		var sum_energy : float = 0.0
-		var rays := jitter_ray_angle( base_rays[ ray_idx ], N, angle_deg )
+		var rays := jitter_ray_angle( base_rays[ ray_idx ], N, jitter_angle )
+		jitter_angle = angle_deg # for next time
 		for ray in rays:
 			# I don't want these raycasts draw, even in debug
 			query.from = _camera.global_position
@@ -447,7 +465,7 @@ func process_directional_light_rays(	lights : Array[ DirectionalLight3D ],
 					var e : float = norm.dot( light.global_basis.z ) * light.light_energy
 					if e > 0.0:
 						# do a raycast to make sure the directional light doesn't hit anything
-						var pos : Vector3 = lerp( _camera.global_position, res.position, 0.75 )
+						var pos : Vector3 = lerp( _camera.global_position, res.position, 0.875 )
 						if not raycast(		pos + light.global_basis.z * thickness, 
 											pos + light.global_basis.z * 0.001 ):
 							sum_energy += e
@@ -456,12 +474,13 @@ func process_directional_light_rays(	lights : Array[ DirectionalLight3D ],
 							sum_normal += norm * e
 		if sum_energy > 0.0:
 			var light_entry : Dictionary = {}
-			light_entry[ ray_storage.energy ] = sum_energy
-			light_entry[ ray_storage.pos ] = sum_position / sum_energy
+			light_entry[ ray_storage.energy ] = sum_energy / N
+			light_entry[ ray_storage.pos ] = lerp( _camera.global_position, 
+							sum_position / sum_energy, placement_fraction )
 			light_entry[ ray_storage.norm ] = sum_normal / sum_energy
 			light_entry[ ray_storage.color ] = sum_color / sum_energy
 			light_entry[ ray_storage.rad ] = directional_proximity
-			update_light_data( token_directional_light, ray_idx, light_entry, modulate / N )
+			update_light_data( token_directional_light, ray_idx, light_entry, modulate )
 			active_VPLs += 1
 		else:
 			light_filter[ token_directional_light ].erase( ray_idx )
@@ -470,18 +489,20 @@ func process_directional_light_rays(	lights : Array[ DirectionalLight3D ],
 func handle_all_directional_lights( lights : Array[ DirectionalLight3D ] ):
 	# like an omnilight, cast rays from the camera
 	if lights:
-		if per_directional > 0:
+		if (directional_vpls > 0) or add_looking_VPL:
 			light_filter.get_or_add( token_directional_light, {} )
 			light_data.get_or_add( token_directional_light, {} )
 			
-			var rays := distribute_omni_rays( per_directional )
+			var rays := distribute_omni_rays( directional_vpls )
+			if add_looking_VPL: # add it to the front
+				rays.insert( 0, -_camera.global_basis.z )
 			for i in rays.size():
 				rays[i] *= directional_proximity
 			# do the ray casts
 			var compensate_N_pts : float = 1.0 / rays.size()
-			var angle_deg : float = sqrt( 14400.0 * compensate_N_pts )
+			var angle_deg : float = sqrt( 14400.0 / max( 1, directional_vpls ) )
 			process_directional_light_rays( lights, rays, angle_deg, 
-							bounce_gain * scale_all_light_energy * compensate_N_pts )
+							bounce_gain * compensate_N_pts * scale_all_light_energy )
 		else:
 			for light in lights:
 				trivial_directional( light )
@@ -497,16 +518,16 @@ func trivial_directional( light : Light3D ):
 	active_VDLs += 1
 
 func process_spot( light : Light3D ):
-	var compensate_N_pts : float = 1.0 / per_spot
+	var compensate_N_pts : float = 1.0 / vpls_per_spot
 	# these rays never use real random jitter
 	var rays := jitter_ray_angle( -light.spot_range * light.global_basis.z, 
-									per_spot, light.spot_angle, false )
+									vpls_per_spot, light.spot_angle, false )
 	process_light_rays( light, rays, light.spot_angle * sqrt( compensate_N_pts ), 
 		light.light_energy * bounce_gain * scale_all_light_energy * compensate_N_pts )
 
 func process_omni( light : Light3D ):
 	# where do I want to cast rays, and size them correctly
-	var rays := distribute_omni_rays( per_omni )
+	var rays := distribute_omni_rays( vpls_per_omni )
 	for i in rays.size():
 		rays[i] *= light.omni_range
 	# do the ray casts
@@ -552,7 +573,7 @@ func qrnd_distrib( index : int, scale_01 : float = 1.0 ) -> Vector2:
 	return ( ( mid2d + g2 * index ).posmod( 1.0 ) - mid2d) * scale_01 + mid2d;
 
 func _enter_tree():
-	allocate_VPLs( max_points )
+	allocate_VPLs( max_vpls )
 
 func _exit_tree():
 	allocate_VPLs( 0 )
@@ -560,7 +581,7 @@ func _exit_tree():
 func allocate_VPLs( N : int ):
 	if N != VPL_inst.size():
 		# safety first
-		N = max( 0, min( max_points, N ) )
+		N = max( 0, min( max_vpls, N ) )
 		print( "VPL count ", VPL_inst.size(), " -> ", N )
 		# do we need to remove some RIDs?
 		while VPL_inst.size() > N:

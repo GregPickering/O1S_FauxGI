@@ -35,12 +35,10 @@ use_collision = true
 
 [node name="CSGBox3D" type="CSGBox3D" parent="Geometry"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.637817, 1.77835, 0.395508)
-flip_faces = true
 size = Vector3(6.75, 5.25, 5.75)
 
 [node name="CSGBox3D3" type="CSGBox3D" parent="Geometry/CSGBox3D"]
 operation = 2
-flip_faces = true
 size = Vector3(6.5, 5, 5.5)
 
 [node name="CSGCylinder3D" type="CSGCylinder3D" parent="Geometry/CSGBox3D"]
@@ -75,7 +73,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.80649, -0.955527, -2.43044)
 size = Vector3(15.4212, 0.1, 36.4354)
 
 [node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(-0.754169, 0, 0.65668, 0, 1, 0, -0.65668, 0, -0.754169, 0, 0, 0)
+transform = Transform3D(-0.0871534, 0, 0.996195, 0, 1, 0, -0.996195, 0, -0.0871534, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 
 [node name="SpotLight3D" type="SpotLight3D" parent="SpinSpot"]
@@ -92,7 +90,7 @@ light_energy = 1.5
 shadow_enabled = true
 
 [node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(-0.391447, 0, -0.920201, 0, 1, 0, 0.920201, 0, -0.391447, 0, 0, 0)
+transform = Transform3D(-0.977943, 0, 0.208873, 0, 1, 0, -0.208873, 0, -0.977943, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 speed = -0.25
 
@@ -106,7 +104,7 @@ directional_shadow_pancake_size = 0.0
 sky_mode = 1
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinDir"]
-transform = Transform3D(-0.859002, 0, 0.511972, 0, 1, 0, -0.511972, 0, -0.859002, 2.056, -0.52, -0.521)
+transform = Transform3D(-0.859002, 0, 0.511972, 0, 1, 0, -0.511972, 0, -0.859002, 2.056, -0.19, -0.521)
 light_color = Color(1, 0, 0, 1)
 shadow_enabled = true
 omni_range = 3.0

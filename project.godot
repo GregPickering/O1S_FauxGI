@@ -36,5 +36,5 @@ folder_colors={
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 reflections/reflection_atlas/reflection_size=128
-anti_aliasing/quality/msaa_3d=3
+anti_aliasing/quality/msaa_3d=1
 anti_aliasing/quality/screen_space_aa=1
