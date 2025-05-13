@@ -73,11 +73,12 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.80649, -0.955527, -2.43044)
 size = Vector3(15.4212, 0.1, 36.4354)
 
 [node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(-0.0871534, 0, 0.996195, 0, 1, 0, -0.996195, 0, -0.0871534, 0, 0, 0)
+transform = Transform3D(-0.678354, 0, -0.734735, 0, 1, 0, 0.734735, 0, -0.678354, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 
 [node name="SpotLight3D" type="SpotLight3D" parent="SpinSpot"]
 transform = Transform3D(0.952537, 0.131593, -0.274512, 0.304381, -0.396676, 0.866026, 0.00507104, -0.908477, -0.417903, 0.79985, 3.19763, -0.713908)
+visible = false
 light_color = Color(0.192157, 1, 0.32549, 1)
 light_energy = 2.0
 shadow_enabled = true
@@ -86,11 +87,12 @@ spot_angle = 30.0
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinSpot"]
 transform = Transform3D(-0.128348, 0, -0.991729, 0, 1, 0, 0.991729, 0, -0.128348, -0.711475, 1.74288, -0.629222)
+visible = false
 light_energy = 1.5
 shadow_enabled = true
 
 [node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(-0.977943, 0, 0.208873, 0, 1, 0, -0.208873, 0, -0.977943, 0, 0, 0)
+transform = Transform3D(0.705531, 0, -0.708679, 0, 1, 0, 0.708679, 0, 0.705531, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 speed = -0.25
 
@@ -105,6 +107,7 @@ sky_mode = 1
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinDir"]
 transform = Transform3D(-0.859002, 0, 0.511972, 0, 1, 0, -0.511972, 0, -0.859002, 2.056, -0.19, -0.521)
+visible = false
 light_color = Color(1, 0, 0, 1)
 shadow_enabled = true
 omni_range = 3.0

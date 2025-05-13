@@ -9,7 +9,7 @@ latest stable version of Godot (4.4.1).
 Using FauxGI is simple:
 1. Copy the O1S_FauxGI folder into your own project
 2. "Instantiate Child Scene.." under the top level Node, and select "faux_gi.tscn"
-3. Make sure the scene's geometry has collision shapes
+3. Make sure the scene's geometry has collision shapes and the lights cast shadows
 
 You can optionally play with the FauxGI settings while watching the results in the 3D preview window.
 

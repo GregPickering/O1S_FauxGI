@@ -73,7 +73,7 @@ var in_editor : bool = Engine.is_editor_hint()
 ## How many raycasts per VPL per _physics_process for spot and omni lights, 0+
 @export_range( 0, 100 ) var oversample : int = 8
 ## Filter the VPLs over time (0=never update/infinite filtering, 1=instant update/no filtering)
-@export_range( 0.01, 1.0, 0.01 ) var temporal_filter : float = 0.25
+@export_range( 0.01, 1.0, 0.01, "exp") var temporal_filter : float = 0.25
 ## place the VPL (0=at light origin, 1=at intersection)
 @export_range( 0.0, 1.1, 0.01 ) var placement_fraction : float = 0.5
 
@@ -95,7 +95,7 @@ var in_editor : bool = Engine.is_editor_hint()
 ## Max distance for the placement of directional light bounces
 @export var directional_proximity : float = 20.0
 ## Max distance to check for directional light being intercepted
-@export var thickness : float = 100.0
+@export var dir_scan_length : float = 100.0
 
 # original light sources in the scene
 var light_sources : Array[ Light3D ] = []
@@ -104,7 +104,7 @@ var light_filter : Dictionary[ Light3D, Dictionary ]
 var light_data : Dictionary[ Light3D, Dictionary ]
 # do we need to start fresh with the temporal data?
 var light_data_stale : bool = true
-# put all directional lights into a grid
+# all directional lights share a set of VPLs, so we need a universal Key for our dictionaries
 var token_directional_light := DirectionalLight3D.new() # don't attach
 
 # keep a pool of our Virtual Points Lights
@@ -466,8 +466,8 @@ func process_directional_light_rays(	lights : Array[ DirectionalLight3D ],
 					if e > 0.0:
 						# do a raycast to make sure the directional light doesn't hit anything
 						var pos : Vector3 = lerp( _camera.global_position, res.position, 0.875 )
-						if not raycast(		pos + light.global_basis.z * thickness, 
-											pos + light.global_basis.z * 0.001 ):
+						if not raycast(		pos + light.global_basis.z * 0.001, 
+											pos + light.global_basis.z * dir_scan_length ):
 							sum_energy += e
 							sum_color += light.light_color * e
 							sum_position += pos * e
