@@ -38,6 +38,8 @@ const VPLs_use_spots : bool = true
 const include_shadowless : bool = false
 ## scales all light power
 const scale_all_light_energy : float = 0.25
+## ignore any VPLs with negligible energy
+const vpl_energy_floor : float = 1e-5
 ## the colors for visualizing raycasts
 const ray_hit_color := Color.LIGHT_GREEN
 const ray_miss_color := Color.LIGHT_CORAL
@@ -73,7 +75,7 @@ var in_editor : bool = Engine.is_editor_hint()
 ## How many raycasts per VPL per _physics_process for spot and omni lights, 0+
 @export_range( 0, 100 ) var oversample : int = 8
 ## Filter the VPLs over time (0=never update/infinite filtering, 1=instant update/no filtering)
-@export_range( 0.01, 1.0, 0.01, "exp") var temporal_filter : float = 0.25
+@export_range( 0.01, 1.0, 0.005, "exp") var temporal_filter : float = 0.5
 ## place the VPL (0=at light origin, 1=at intersection)
 @export_range( 0.0, 1.1, 0.01 ) var placement_fraction : float = 0.5
 
@@ -99,9 +101,8 @@ var in_editor : bool = Engine.is_editor_hint()
 
 # original light sources in the scene
 var light_sources : Array[ Light3D ] = []
-# keep data per light for temporal smoothing (cascaded exponential filter)
-var light_filter : Dictionary[ Light3D, Dictionary ]
-var light_data : Dictionary[ Light3D, Dictionary ]
+# track all (possibly noisy) VPL target data, indexed by the casting light and a sub-index
+var VPL_targets : Dictionary[ Light3D, Dictionary ] = {}
 # do we need to start fresh with the temporal data?
 var light_data_stale : bool = true
 # all directional lights share a set of VPLs, so we need a universal Key for our dictionaries
@@ -141,69 +142,28 @@ func _physics_process( _delta ):
 	raycast_hits.clear()
 	raycast_misses.clear()
 	if bounce_gain >= 0.01:
-		var active_dir_lights : Array[ DirectionalLight3D ]
-		# to I need to refresh all light data?
+		# do I need to refresh all light data?
 		if light_data_stale:
-			light_filter.clear()
-			light_data.clear()
-			light_data_stale = false
+			VPL_targets = {}
 		# now run through all active light sources in the scene
+		var active_dir_lights : Array[ DirectionalLight3D ]
 		for light in light_sources:
 			if light.is_visible_in_tree() and (light.light_energy > 0.0):
-				light_filter.get_or_add( light, {} )
-				light_data.get_or_add( light, {} )
+				VPL_targets.get_or_add( light, {} )
 				match light.get_class():
-					"DirectionalLight3D": 
-						#process_dirl( light )
-						active_dir_lights.push_back( light )
+					"DirectionalLight3D": active_dir_lights.push_back( light )
 					"OmniLight3D": process_omni( light )
 					"SpotLight3D": process_spot( light )
 			else:
-				light_filter.erase( light )
-				light_data.erase( light )
+				VPL_targets.erase( light )
 		# Directional lights
 		handle_all_directional_lights( active_dir_lights )
-		# Gather all active VPLs into a convenient array
-		var preVPLs : Array[ Dictionary ] = []
-		for light in light_data:
-			for idx in light_data[ light ]:
-				if light_data[ light ][ idx ][ ray_storage.energy ] > 0.0:
-					preVPLs.push_back( light_data[ light ][ idx ] )
-					preVPLs.back()[ ray_storage.color ] = light.light_color
-		# Do we need a second pass to filter out the top N VPLs?
-		if preVPLs.size() > max_vpls:
-			# sort most to least energetic
-			preVPLs.sort_custom( func(a, b): return a[ ray_storage.energy ] > b[ ray_storage.energy ] )
-			# do I want to average all the lights that will get cut?
-			if true:
-				var avg_VPL : Dictionary = preVPLs[ 0 ]
-				for key in avg_VPL:
-					avg_VPL[ key ] *= 0.0
-				var sum_energy : float = 0.0
-				for idx in range( max_vpls - 1, preVPLs.size() ):
-					var e : float = preVPLs[ idx ][ ray_storage.energy ]
-					sum_energy += e;
-					for key in preVPLs[ idx ]:
-						avg_VPL[ key ] += preVPLs[ idx ][ key ] * e
-				var gain : float = 1.0 / sum_energy
-				for key in avg_VPL:
-					avg_VPL[ key ] *= gain
-				avg_VPL[ ray_storage.energy ] = sum_energy
-			# just throw away the rest
-			preVPLs.resize( max_vpls )
-		# finally add the VPLs
-		active_VPLs = 0
-		for preVPL in preVPLs:
-			config_VPL(	active_VPLs,
-					preVPL[ ray_storage.pos ],
-					preVPL[ ray_storage.color ], 
-					preVPL[ ray_storage.energy ], 
-					preVPL[ ray_storage.rad ] )
-			active_VPLs += 1
+		# do something with that info
+		filter_and_emit_VPLs()
 	else:
-		light_filter.clear()
-		light_data.clear()
-	# done with raycasts
+		VPL_targets.clear()
+	
+	# the user may wish to display raycasts
 	draw_rays.clear_surfaces()
 	if show_raycasts:
 		if not raycast_hits.is_empty():
@@ -233,6 +193,79 @@ func _physics_process( _delta ):
 		last_active_VDLs = active_VDLs
 		print( last_active_VDLs, " active VDLs" )
 
+# cascaded exponential filtering
+var VPL_filt_1 : Dictionary[ Light3D, Dictionary ]
+var VPL_filt_2 : Dictionary[ Light3D, Dictionary ]
+var VPL_filt_3 : Dictionary[ Light3D, Dictionary ]
+func filter_and_emit_VPLs():
+	if light_data_stale:
+		VPL_filt_1.clear()
+		VPL_filt_2.clear()
+		VPL_filt_3.clear()
+		light_data_stale = false
+	# cascaded exponential filtering
+	for light in VPL_targets:
+		if not VPL_filt_1.has( light ):
+			VPL_filt_1[ light ] = VPL_targets[ light ].duplicate( true )
+			VPL_filt_2[ light ] = VPL_targets[ light ].duplicate( true )
+			VPL_filt_3[ light ] = VPL_targets[ light ].duplicate( true )
+		for idx in VPL_targets[ light ]:
+			if not VPL_filt_1[ light ].has( idx ):
+				VPL_filt_1[ light ][ idx ] = VPL_targets[ light ][ idx ].duplicate( true )
+				VPL_filt_2[ light ][ idx ] = VPL_targets[ light ][ idx ].duplicate( true )
+				VPL_filt_3[ light ][ idx ] = VPL_targets[ light ][ idx ].duplicate( true )
+			for key in VPL_targets[ light ][ idx ]:
+				# cascade in reverse order
+				VPL_filt_3[ light ][ idx ][ key ] = lerp(
+						VPL_filt_3[ light ][ idx ][ key ], 
+						VPL_targets[ light ][ idx ][ key ],
+						temporal_filter )
+				VPL_filt_2[ light ][ idx ][ key ] = lerp(
+						VPL_filt_2[ light ][ idx ][ key ], 
+						VPL_filt_3[ light ][ idx ][ key ],
+						temporal_filter )
+				VPL_filt_1[ light ][ idx ][ key ] = lerp(
+						VPL_filt_1[ light ][ idx ][ key ], 
+						VPL_filt_2[ light ][ idx ][ key ],
+						temporal_filter )
+	# Gather all active VPLs into a convenient array
+	var preVPLs : Array[ Dictionary ] = []
+	for light in VPL_targets:
+		for idx in VPL_targets[ light ]:
+			if VPL_filt_1[ light ][ idx ][ ray_storage.energy ] > vpl_energy_floor:
+				preVPLs.push_back( VPL_filt_1[ light ][ idx ] )
+				preVPLs.back()[ ray_storage.color ] = light.light_color
+	# Do we need a second pass to filter out the top N VPLs?
+	if preVPLs.size() > max_vpls:
+		# sort most to least energetic
+		preVPLs.sort_custom( func(a, b): return a[ ray_storage.energy ] > b[ ray_storage.energy ] )
+		# do I want to average all the lights that will get cut?
+		if true:
+			var avg_VPL : Dictionary = preVPLs[ 0 ]
+			for key in avg_VPL:
+				avg_VPL[ key ] *= 0.0
+			var sum_energy : float = 0.0
+			for idx in range( max_vpls - 1, preVPLs.size() ):
+				var e : float = preVPLs[ idx ][ ray_storage.energy ]
+				sum_energy += e;
+				for key in preVPLs[ idx ]:
+					avg_VPL[ key ] += preVPLs[ idx ][ key ] * e
+			var gain : float = 1.0 / sum_energy
+			for key in avg_VPL:
+				avg_VPL[ key ] *= gain
+			avg_VPL[ ray_storage.energy ] = sum_energy
+		# just throw away the rest
+		preVPLs.resize( max_vpls )
+	# finally add the VPLs
+	active_VPLs = 0
+	for preVPL in preVPLs:
+		config_VPL(	active_VPLs,
+				preVPL[ ray_storage.pos ],
+				preVPL[ ray_storage.color ], 
+				preVPL[ ray_storage.energy ], 
+				preVPL[ ray_storage.rad ] )
+		active_VPLs += 1
+	
 func process_ray_dummy( from : Vector3, to : Vector3, done_frac : float = 0.5 ) -> Dictionary:
 	# This function is only called if Oversample is 0, i.e. no raycasts
 	var res_light : Dictionary
@@ -402,29 +435,15 @@ func process_rays_angle( from : Vector3, to : Vector3, N : int, deg : float ) ->
 	else:
 		return process_ray_dummy( from, to, 0.5 )
 
-func update_light_data( light : Light3D, idx : int, data : Dictionary, modulate : float ):
-	if light:
-		if data:
-			# scale in the actual light energy here
-			data[ ray_storage.energy ] *= modulate * light.light_indirect_energy
-			if light_data[ light ].has( idx ):
-				for key in data:
-					# Cascaded exponential filter
-					light_filter[ light ][ idx ][ key ] = lerp( 
-							light_filter[ light ][ idx ][ key ],
-							data[ key ], temporal_filter )
-					light_data[ light ][ idx ][ key ] = lerp( 
-							light_data[ light ][ idx ][ key ],
-							light_filter[ light ][ idx ][ key ], temporal_filter )
-			else:
-				light_filter[ light ][ idx ] = data#.duplicate()
-				light_data[ light ][ idx ] = data#.duplicate()
-				# do I want the amplitude to fade in?
-				light_filter[ light ][ idx ][ ray_storage.energy ] *= temporal_filter
-				light_data[ light ][ idx ][ ray_storage.energy ] *= temporal_filter * temporal_filter
-		else:
-			light_filter[ light ].erase( idx )
-			light_data[ light ].erase( idx )
+func update_light_target( light : Light3D, idx : int, data : Dictionary, modulate : float ):
+	if light and data:
+		# scale in the actual light energy here
+		data[ ray_storage.energy ] *= modulate * light.light_indirect_energy
+		VPL_targets[ light ][ idx ] = data
+
+func zero_light_target( light : Light3D, idx : int ):
+	if light and VPL_targets.has( light ) and VPL_targets[ light ].has( idx ):
+		VPL_targets[ light ][ idx ][ ray_storage.energy ] = 0.0
 
 func process_light_rays( light : Light3D, rays : PackedVector3Array, angle_deg : float, modulate : float ):
 	for ray_idx in rays.size():
@@ -433,11 +452,10 @@ func process_light_rays( light : Light3D, rays : PackedVector3Array, angle_deg :
 						light.global_position + rays[ ray_idx ],
 						oversample, angle_deg )
 		if ray_res:
-			update_light_data( light, ray_idx, ray_res, modulate )
+			update_light_target( light, ray_idx, ray_res, modulate )
 			active_VPLs += 1
 		else:
-			light_filter[ light ].erase( ray_idx )
-			light_data[ light ].erase( ray_idx )
+			zero_light_target( light, ray_idx )
 
 func process_directional_light_rays(	lights : Array[ DirectionalLight3D ], 
 										base_rays : PackedVector3Array, 
@@ -479,19 +497,17 @@ func process_directional_light_rays(	lights : Array[ DirectionalLight3D ],
 							sum_position / sum_energy, placement_fraction )
 			light_entry[ ray_storage.norm ] = sum_normal / sum_energy
 			light_entry[ ray_storage.color ] = sum_color / sum_energy
-			light_entry[ ray_storage.rad ] = directional_proximity
-			update_light_data( token_directional_light, ray_idx, light_entry, modulate )
+			light_entry[ ray_storage.rad ] = directional_proximity * 2.0
+			update_light_target( token_directional_light, ray_idx, light_entry, modulate )
 			active_VPLs += 1
 		else:
-			light_filter[ token_directional_light ].erase( ray_idx )
-			light_data[ token_directional_light ].erase( ray_idx )
+			zero_light_target( token_directional_light, ray_idx )
 
 func handle_all_directional_lights( lights : Array[ DirectionalLight3D ] ):
 	# like an omnilight, cast rays from the camera
 	if lights:
 		if (directional_vpls > 0) or add_looking_VPL:
-			light_filter.get_or_add( token_directional_light, {} )
-			light_data.get_or_add( token_directional_light, {} )
+			VPL_targets.get_or_add( token_directional_light, {} )
 			
 			var rays := distribute_omni_rays( directional_vpls )
 			if add_looking_VPL: # add it to the front
@@ -502,13 +518,12 @@ func handle_all_directional_lights( lights : Array[ DirectionalLight3D ] ):
 			var compensate_N_pts : float = 1.0 / rays.size()
 			var angle_deg : float = sqrt( 14400.0 / max( 1, directional_vpls ) )
 			process_directional_light_rays( lights, rays, angle_deg, 
-							bounce_gain * compensate_N_pts * scale_all_light_energy )
+							bounce_gain * compensate_N_pts )# * scale_all_light_energy )
 		else:
 			for light in lights:
 				trivial_directional( light )
 	else:
-		light_filter.erase( token_directional_light )
-		light_data.erase( token_directional_light )
+		VPL_targets.erase( token_directional_light )
 
 func trivial_directional( light : Light3D ):
 	var e : float = (light.light_energy * light.light_indirect_energy * 
