@@ -73,9 +73,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.80649, -0.955527, -2.43044)
 size = Vector3(15.4212, 0.1, 36.4354)
 
 [node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(0.950639, 0, -0.310301, 0, 1, 0, 0.310301, 0, 0.950639, 0, 0, 0)
+transform = Transform3D(0.850745, 0, 0.525579, 0, 1, 0, -0.525579, 0, 0.850745, 0, 0, 0)
 script = ExtResource("3_ok1gl")
-speed = 0.5
+speed = -1.795
 
 [node name="SpotLight3D" type="SpotLight3D" parent="SpinSpot"]
 transform = Transform3D(0.952537, 0.131593, -0.274512, 0.304381, -0.396676, 0.866026, 0.00507104, -0.908477, -0.417903, 0.79985, 3.19763, -0.713908)
@@ -91,13 +91,13 @@ light_energy = 1.5
 shadow_enabled = true
 
 [node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(-0.607903, 0, 0.794011, 0, 1, 0, -0.794011, 0, -0.607903, 0, 0, 0)
+transform = Transform3D(0.376951, 0, -0.926233, 0, 1, 0, 0.926233, 0, 0.376951, 0, 0, 0)
 script = ExtResource("3_ok1gl")
-speed = -0.42
+speed = 0.42
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="SpinDir"]
 transform = Transform3D(0.982008, -0.188398, 0.0128751, 0.0752052, 0.452719, 0.888476, -0.173216, -0.871523, 0.458742, 0, 2, 0)
-light_color = Color(0.266667, 1, 1, 1)
+light_color = Color(0.804364, 0.600976, 0.890119, 1)
 shadow_enabled = true
 directional_shadow_mode = 0
 directional_shadow_max_distance = 15.0

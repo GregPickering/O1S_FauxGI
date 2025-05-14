@@ -56,8 +56,9 @@ var in_editor : bool = Engine.is_editor_hint()
 @export_range( 1, 32 ) var max_directionals : int = 8
 ## What fraction of energy is preserved each bounce
 @export_range( 0.0, 1.0, 0.01 ) var bounce_gain : float = 0.25
-## Use real random vectors instead of a repeatable pattern (requires heavy temporal filtering)
-@export var real_random_jitter : bool = false
+## What percent of oversamples use repeatable instead of changing pseudo-random
+## vectors (low  values require heavier temporal filtering)
+@export_range( 0.0, 100.0, 0.1 ) var percent_stable : float = 100.0
 ## Visualize the raycasts?
 @export var show_raycasts : bool = false
 
@@ -234,7 +235,8 @@ func filter_and_emit_VPLs():
 		for idx in VPL_targets[ light ]:
 			if VPL_filt_1[ light ][ idx ][ ray_storage.energy ] > vpl_energy_floor:
 				preVPLs.push_back( VPL_filt_1[ light ][ idx ] )
-				preVPLs.back()[ ray_storage.color ] = light.light_color
+				# directional VPLs already have a color, but the token directional light does not
+				preVPLs.back().get_or_add( ray_storage.color, light.light_color )
 	# Do we need a second pass to filter out the top N VPLs?
 	if preVPLs.size() > max_vpls:
 		# sort most to least energetic
@@ -364,21 +366,19 @@ func raycast_average( rays_from_to : PackedVector3Array,
 	return avg_ray_res
 	
 func jitter_ray_angle(	ray : Vector3, N : int, deg : float, 
-						true_rnd : bool = real_random_jitter ) -> PackedVector3Array:
-	# always start with the original?
-	var rays : PackedVector3Array = [] # [ ray ]
-	# now add others
-	if N > 0:
-		var length : float = -ray.length()
-		var xform := Quaternion( Vector3(0,0,-1), ray )
-		for samp in range( 0, N ):
-			var samp_2d : Vector2
-			if true_rnd:
-				samp_2d = Vector2( randf_range(-0.5, 0.5), randf_range(-0.5, 0.5) ) * (deg / 120.0) + Vector2(0.5,0.5)
-			else:
-				samp_2d = qrnd_distrib( samp, deg / 120.0 )
-			var sample_vec := Vector3.octahedron_decode( samp_2d )
-			rays.push_back( (xform * sample_vec) * length )
+						percent_quasirandom : float = percent_stable ) -> PackedVector3Array:
+	var rays : PackedVector3Array = []
+	var length : float = -ray.length()
+	var xform := Quaternion( Vector3(0,0,-1), ray )
+	var rand_thresh : float = N * percent_quasirandom * 0.01
+	var samp_2d : Vector2
+	for samp in range( 0, N ):
+		if (samp >= rand_thresh):
+			samp_2d = (	Vector2( randf_range(-0.5, 0.5), randf_range(-0.5, 0.5) ) * 
+						(deg / 120.0) + Vector2(0.5,0.5))
+		else:
+			samp_2d = qrnd_distrib( samp, deg / 120.0 )
+		rays.push_back( (xform * Vector3.octahedron_decode( samp_2d )) * length )
 	return rays
 
 var cached_omni_rays : PackedVector3Array = []
@@ -461,11 +461,11 @@ func process_directional_light_rays(	lights : Array[ DirectionalLight3D ],
 										base_rays : PackedVector3Array, 
 										angle_deg : float, modulate : float ):
 	# the first ray may be special
-	var jitter_angle : float = 60.0 if add_looking_VPL else angle_deg
+	var jitter_angle : float = 45.0 if add_looking_VPL else angle_deg
 	for ray_idx in base_rays.size():
 		# oversample each base ray
 		var N : int = max( 1, oversample_dir )
-		var sum_color : Color = Color()
+		var sum_color := Color(0,0,0,0)
 		var sum_position := Vector3.ZERO
 		var sum_normal := Vector3.ZERO
 		var sum_energy : float = 0.0
@@ -497,6 +497,7 @@ func process_directional_light_rays(	lights : Array[ DirectionalLight3D ],
 							sum_position / sum_energy, placement_fraction )
 			light_entry[ ray_storage.norm ] = sum_normal / sum_energy
 			light_entry[ ray_storage.color ] = sum_color / sum_energy
+			#print( light_entry[ ray_storage.color ] )
 			light_entry[ ray_storage.rad ] = directional_proximity * 2.0
 			update_light_target( token_directional_light, ray_idx, light_entry, modulate )
 			active_VPLs += 1
@@ -536,7 +537,7 @@ func process_spot( light : Light3D ):
 	var compensate_N_pts : float = 1.0 / vpls_per_spot
 	# these rays never use real random jitter
 	var rays := jitter_ray_angle( -light.spot_range * light.global_basis.z, 
-									vpls_per_spot, light.spot_angle, false )
+									vpls_per_spot, light.spot_angle, 100.0 )
 	process_light_rays( light, rays, light.spot_angle * sqrt( compensate_N_pts ), 
 		light.light_energy * bounce_gain * scale_all_light_energy * compensate_N_pts )
 
