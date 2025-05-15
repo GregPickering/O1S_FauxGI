@@ -52,6 +52,8 @@ var in_editor : bool = Engine.is_editor_hint()
 @export_category( "Scene Integration" )
 ## The node containing all the lights we wish to GI-ify
 @export var top_node : Node3D = null
+## A label if we want some status text
+@export var label_node : Label = null
 ## Maximum number of Virtual Point Lights we can add to the scene to simulate GI
 @export_range( 1, 1024 ) var max_vpls : int = 32
 ## Maximum number of directional sources we can add to the scene to simulate GI
@@ -211,9 +213,20 @@ func _physics_process( _delta ):
 	if last_active_VDLs != active_VDLs:
 		last_active_VDLs = active_VDLs
 		print( last_active_VDLs, " active VDLs" )
+	# status?
+	if label_node:
+		if bounce_gain < 0.01:
+			label_node.text = "FauxGI DISABLED"
+		else:
+			label_node.text = (
+				str( active_VPLs ) + " VPL, " +
+				str( active_VDLs ) + " VDL, %1.4f amb " % ambient_energy
+				)
 
+var ambient_energy : float = 0.0
 func disable_ambient_secondaries():
 	if environment_node and environment_node.environment:
+		ambient_energy = 0.0
 		environment_node.environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
 	
 # cascaded exponential filtering
@@ -273,7 +286,9 @@ func filter_and_emit_VPLs():
 		# and in case we are updating the environmental ambient...
 		environment_node.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		environment_node.environment.ambient_light_color = global_color / global_energy
-		environment_node.environment.ambient_light_energy = global_energy * ambient_gain
+		ambient_energy = global_energy * ambient_gain
+		environment_node.environment.ambient_light_energy = ambient_energy
+		#print( global_energy )
 
 	# Do we need a second pass to filter out the top N VPLs?
 	if preVPLs.size() > max_vpls:

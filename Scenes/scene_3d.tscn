@@ -1,17 +1,16 @@
-[gd_scene load_steps=11 format=3 uid="uid://btirfsc7rf58b"]
+[gd_scene load_steps=10 format=3 uid="uid://btirfsc7rf58b"]
 
 [ext_resource type="PackedScene" uid="uid://b3vmtf81ju271" path="res://O1S_FauxGI/faux_gi.tscn" id="1_q5cge"]
 [ext_resource type="Script" uid="uid://d06yfe050b2oh" path="res://Scripts/camera.gd" id="2_pjwey"]
 [ext_resource type="Script" uid="uid://b4hkm2djkjy16" path="res://Scripts/spin_lights.gd" id="3_ok1gl"]
 [ext_resource type="Script" uid="uid://dpjhlb182qd2e" path="res://Scripts/fps.gd" id="4_cqamk"]
 [ext_resource type="Script" uid="uid://b74n28fy47qj1" path="res://Scripts/cb_v_sync.gd" id="5_c5wjy"]
-[ext_resource type="Script" uid="uid://bu0i1okglx0ic" path="res://Scripts/faux_gi_status_label.gd" id="6_bn1vk"]
 [ext_resource type="Script" uid="uid://h3bi55a3ev55" path="res://Scripts/renderer_label.gd" id="7_pjwey"]
 
 [sub_resource type="Environment" id="Environment_q5cge"]
 ambient_light_source = 2
-ambient_light_color = Color(0.804364, 0.600976, 0.890119, 1)
-ambient_light_energy = 0.030242
+ambient_light_color = Color(0.555033, 0.867273, 0.613327, 1)
+ambient_light_energy = 0.130593
 tonemap_mode = 3
 volumetric_fog_density = 0.271
 
@@ -23,10 +22,12 @@ albedo_color = Color(1, 0.635294, 0.105882, 1)
 
 [node name="Scene3D" type="Node3D"]
 
-[node name="FauxGI" parent="." node_paths=PackedStringArray("environment_node") instance=ExtResource("1_q5cge")]
+[node name="FauxGI" parent="." node_paths=PackedStringArray("top_node", "label_node", "environment_node") instance=ExtResource("1_q5cge")]
+top_node = NodePath("..")
+label_node = NodePath("../UICanvas/FauxGIStatusLabel")
 bounce_gain = 1.0
+percent_stable = 75.0
 oversample_dir = 32
-add_looking_VPL = false
 environment_node = NodePath("../WorldEnvironment")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
@@ -79,13 +80,12 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.80649, -0.955527, -2.43044)
 size = Vector3(15.4212, 0.1, 36.4354)
 
 [node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(0.884906, 0, 0.465769, 0, 1, 0, -0.465769, 0, 0.884906, 0, 0, 0)
+transform = Transform3D(-0.635147, 0, 0.772391, 0, 1, 0, -0.772391, 0, -0.635147, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 speed = -1.795
 
 [node name="SpotLight3D" type="SpotLight3D" parent="SpinSpot"]
 transform = Transform3D(0.952537, 0.131593, -0.274512, 0.304381, -0.396676, 0.866026, 0.00507104, -0.908477, -0.417903, 0.79985, 3.19763, -0.713908)
-visible = false
 light_color = Color(0.192157, 1, 0.32549, 1)
 light_energy = 2.0
 shadow_enabled = true
@@ -94,12 +94,11 @@ spot_angle = 30.0
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinSpot"]
 transform = Transform3D(-0.128348, 0, -0.991729, 0, 1, 0, 0.991729, 0, -0.128348, -0.711475, 1.74288, -0.629222)
-visible = false
 light_energy = 1.5
 shadow_enabled = true
 
 [node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(-0.344321, 0, 0.938852, 0, 1, 0, -0.938852, 0, -0.344321, 0, 0, 0)
+transform = Transform3D(0.974665, 0, -0.22367, 0, 1, 0, 0.22367, 0, 0.974665, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 speed = 0.42
 
@@ -114,7 +113,6 @@ sky_mode = 1
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinDir"]
 transform = Transform3D(-0.859002, 0, 0.511972, 0, 1, 0, -0.511972, 0, -0.859002, 2.056, -0.19, -0.521)
-visible = false
 light_color = Color(1, 0, 0, 1)
 shadow_enabled = true
 omni_range = 3.0
@@ -149,9 +147,8 @@ anchor_right = 1.0
 offset_left = -261.0
 offset_bottom = 23.0
 grow_horizontal = 0
-text = "FauxGI Status"
+text = "11 VPL, 0 VDL, 0.1306 amb "
 horizontal_alignment = 1
-script = ExtResource("6_bn1vk")
 
 [node name="RendererLabel" type="Label" parent="UICanvas"]
 anchors_preset = 1
