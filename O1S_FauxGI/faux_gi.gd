@@ -102,6 +102,12 @@ var in_editor : bool = Engine.is_editor_hint()
 ## Max distance to check for directional light being intercepted
 @export var dir_scan_length : float = 100.0
 
+@export_category( "Ambient" )
+## Should this update the "Ambient Light" in a WorldEnvironment node?
+@export var environment_node : WorldEnvironment = null
+## How strong should this effect be
+@export_range( 0.0, 1.0, 0.01 ) var ambient_gain : float = 0.25
+
 # original light sources in the scene
 var light_sources : Array[ Light3D ] = []
 # track all (possibly noisy) VPL target data, indexed by the casting light and a sub-index
@@ -173,6 +179,9 @@ func _physics_process( _delta ):
 	else:
 		VPL_targets.clear()
 	
+	if (bounce_gain < 0.01) or (ambient_gain < 0.01):
+		disable_ambient_secondaries()
+	
 	# the user may wish to display raycasts
 	draw_rays.clear_surfaces()
 	if show_raycasts:
@@ -203,6 +212,10 @@ func _physics_process( _delta ):
 		last_active_VDLs = active_VDLs
 		print( last_active_VDLs, " active VDLs" )
 
+func disable_ambient_secondaries():
+	if environment_node and environment_node.environment:
+		environment_node.environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	
 # cascaded exponential filtering
 var VPL_filt_1 : Dictionary[ Light3D, Dictionary ]
 var VPL_filt_2 : Dictionary[ Light3D, Dictionary ]
@@ -246,6 +259,22 @@ func filter_and_emit_VPLs():
 				preVPLs.push_back( VPL_filt_1[ light ][ idx ] )
 				# directional VPLs already have a color, but the token directional light does not
 				preVPLs.back().get_or_add( ray_storage.color, light.light_color )
+	# and do we want to modify ambient to simulate secondary+ bounces?
+	if environment_node and environment_node.environment and (ambient_gain > 0.0):
+		var global_color := Color(0,0,0,0)
+		var global_energy : float = 0.0
+		for preVPL in preVPLs:
+			var r : float = 1.0 * preVPL[ ray_storage.rad ]
+			var d : float = _camera.global_position.distance_to( preVPL[ ray_storage.pos ] )
+			if d < r:
+				var e : float = preVPL[ ray_storage.energy ] * sqrt(1.0 - d / r)
+				global_color += preVPL[ ray_storage.color ] * e
+				global_energy += e
+		# and in case we are updating the environmental ambient...
+		environment_node.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		environment_node.environment.ambient_light_color = global_color / global_energy
+		environment_node.environment.ambient_light_energy = global_energy * ambient_gain
+
 	# Do we need a second pass to filter out the top N VPLs?
 	if preVPLs.size() > max_vpls:
 		# sort most to least energetic

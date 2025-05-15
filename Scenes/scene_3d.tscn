@@ -9,6 +9,9 @@
 [ext_resource type="Script" uid="uid://h3bi55a3ev55" path="res://Scripts/renderer_label.gd" id="7_pjwey"]
 
 [sub_resource type="Environment" id="Environment_q5cge"]
+ambient_light_source = 2
+ambient_light_color = Color(0.804364, 0.600976, 0.890119, 1)
+ambient_light_energy = 0.030242
 tonemap_mode = 3
 volumetric_fog_density = 0.271
 
@@ -20,8 +23,11 @@ albedo_color = Color(1, 0.635294, 0.105882, 1)
 
 [node name="Scene3D" type="Node3D"]
 
-[node name="FauxGI" parent="." instance=ExtResource("1_q5cge")]
+[node name="FauxGI" parent="." node_paths=PackedStringArray("environment_node") instance=ExtResource("1_q5cge")]
 bounce_gain = 1.0
+oversample_dir = 32
+add_looking_VPL = false
+environment_node = NodePath("../WorldEnvironment")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_q5cge")
@@ -73,7 +79,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.80649, -0.955527, -2.43044)
 size = Vector3(15.4212, 0.1, 36.4354)
 
 [node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(0.700217, 0, -0.71393, 0, 1, 0, 0.71393, 0, 0.700217, 0, 0, 0)
+transform = Transform3D(0.884906, 0, 0.465769, 0, 1, 0, -0.465769, 0, 0.884906, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 speed = -1.795
 
@@ -88,12 +94,12 @@ spot_angle = 30.0
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinSpot"]
 transform = Transform3D(-0.128348, 0, -0.991729, 0, 1, 0, 0.991729, 0, -0.128348, -0.711475, 1.74288, -0.629222)
+visible = false
 light_energy = 1.5
 shadow_enabled = true
 
 [node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(-0.870155, 0, -0.492779, 0, 1, 0, 0.492779, 0, -0.870155, 0, 0, 0)
-visible = false
+transform = Transform3D(-0.344321, 0, 0.938852, 0, 1, 0, -0.938852, 0, -0.344321, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 speed = 0.42
 
@@ -108,6 +114,7 @@ sky_mode = 1
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinDir"]
 transform = Transform3D(-0.859002, 0, 0.511972, 0, 1, 0, -0.511972, 0, -0.859002, 2.056, -0.19, -0.521)
+visible = false
 light_color = Color(1, 0, 0, 1)
 shadow_enabled = true
 omni_range = 3.0
