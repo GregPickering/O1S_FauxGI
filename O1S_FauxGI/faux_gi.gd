@@ -173,7 +173,7 @@ func _physics_process( _delta ):
 					"OmniLight3D": process_omni( light )
 					"SpotLight3D": process_spot( light )
 			else:
-				VPL_targets.erase( light )
+				erase_light_data( light )
 		# Directional lights
 		handle_all_directional_lights( active_dir_lights )
 		# do something with that info
@@ -218,21 +218,26 @@ func _physics_process( _delta ):
 		if bounce_gain < 0.01:
 			label_node.text = "FauxGI DISABLED"
 		else:
-			label_node.text = (
-				str( active_VPLs ) + " VPL, " +
-				str( active_VDLs ) + " VDL, %1.4f amb " % ambient_energy
-				)
+			label_node.text = ("%d VPL, %d VDL, %1.4f amb " % 
+				[ active_VPLs, active_VDLs, ambient_energy ] )
 
 var ambient_energy : float = 0.0
 func disable_ambient_secondaries():
 	if environment_node and environment_node.environment:
 		ambient_energy = 0.0
 		environment_node.environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
-	
+
 # cascaded exponential filtering
-var VPL_filt_1 : Dictionary[ Light3D, Dictionary ]
-var VPL_filt_2 : Dictionary[ Light3D, Dictionary ]
-var VPL_filt_3 : Dictionary[ Light3D, Dictionary ]
+var VPL_filt_1 : Dictionary[ Light3D, Dictionary ] = {}
+var VPL_filt_2 : Dictionary[ Light3D, Dictionary ] = {}
+var VPL_filt_3 : Dictionary[ Light3D, Dictionary ] = {}
+
+func erase_light_data( light : Light3D ):
+	VPL_targets.erase( light )
+	VPL_filt_1.erase( light )
+	VPL_filt_2.erase( light )
+	VPL_filt_3.erase( light )
+
 func filter_and_emit_VPLs():
 	if light_data_stale:
 		VPL_filt_1.clear()
@@ -577,7 +582,7 @@ func handle_all_directional_lights( lights : Array[ DirectionalLight3D ] ):
 			for light in lights:
 				trivial_directional( light )
 	else:
-		VPL_targets.erase( token_directional_light )
+		erase_light_data( token_directional_light )
 
 func trivial_directional( light : Light3D ):
 	var e : float = (light.light_energy * light.light_indirect_energy * 

@@ -9,8 +9,8 @@
 
 [sub_resource type="Environment" id="Environment_q5cge"]
 ambient_light_source = 2
-ambient_light_color = Color(0.555033, 0.867273, 0.613327, 1)
-ambient_light_energy = 0.130593
+ambient_light_color = Color(0.548098, 0.859765, 0.55667, 1)
+ambient_light_energy = 0.118826
 tonemap_mode = 3
 volumetric_fog_density = 0.271
 
@@ -29,6 +29,7 @@ bounce_gain = 1.0
 percent_stable = 75.0
 oversample_dir = 32
 environment_node = NodePath("../WorldEnvironment")
+metadata/_edit_group_ = true
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_q5cge")
@@ -80,7 +81,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.80649, -0.955527, -2.43044)
 size = Vector3(15.4212, 0.1, 36.4354)
 
 [node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(-0.635147, 0, 0.772391, 0, 1, 0, -0.772391, 0, -0.635147, 0, 0, 0)
+transform = Transform3D(-0.847415, 0, -0.530932, 0, 1, 0, 0.530932, 0, -0.847415, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 speed = -1.795
 
@@ -98,7 +99,7 @@ light_energy = 1.5
 shadow_enabled = true
 
 [node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(0.974665, 0, -0.22367, 0, 1, 0, 0.22367, 0, 0.974665, 0, 0, 0)
+transform = Transform3D(0.904522, 0, -0.426427, 0, 1, 0, 0.426427, 0, 0.904522, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 speed = 0.42
 
@@ -147,7 +148,7 @@ anchor_right = 1.0
 offset_left = -261.0
 offset_bottom = 23.0
 grow_horizontal = 0
-text = "11 VPL, 0 VDL, 0.1306 amb "
+text = "11 VPL, 0 VDL, 0.1188 amb "
 horizontal_alignment = 1
 
 [node name="RendererLabel" type="Label" parent="UICanvas"]
