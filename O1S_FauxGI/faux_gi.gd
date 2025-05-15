@@ -35,7 +35,9 @@ extends Node3D
 ## VPLs use omni *AND* spot (180 deg), Compatibility's per-mesh limit is "8 spot + 8 omni"
 const VPLs_use_spots : bool = true
 ## Do we want to spawn VPLs for source lights which don't cast shadows?
-const include_shadowless : bool = false
+const include_shadowless : bool = true
+## Do we want to hotkey GTRL+G to toggle FauxGI?
+const enable_ctrl_g : bool = true
 ## scales all light power
 const scale_all_light_energy : float = 0.25
 ## ignore any VPLs with negligible energy
@@ -133,6 +135,13 @@ enum ray_storage { energy, pos, norm, rad, color, dist_frac }
 var raycast_hits : PackedVector3Array = []
 var raycast_misses : PackedVector3Array = []
 @onready var draw_rays : ImmediateMesh = $RaycastDebug.mesh
+
+func _unhandled_key_input( event ):
+	# add the hotkey CTRL+G to toggle global illumination
+	if enable_ctrl_g and (event is InputEventKey):
+		if event.pressed and (event.keycode == KEY_G) and event.is_command_or_control_pressed():
+			bounce_gain = 1.0 if (bounce_gain < 0.5) else 0.0
+			get_viewport().set_input_as_handled()
 
 # I need to raycast, which happens here in the physics process
 func _physics_process( _delta ):
