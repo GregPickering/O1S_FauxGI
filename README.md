@@ -5,25 +5,30 @@ O1S_FauxGI is a lightweight approximation to global illumination for the Godot g
 It supports all three renderers (Compatibility / Mobile / Forward+), and is tested on the 
 latest stable version of Godot (4.4.1).
 
+Any light source with shadows enabled in the scene is considered a primary source.  The first bounce is simulated 
+by adding Virtual Point Lights.  All subsequent bounces are simulated by controlling the ambient term in a 
+WorldEnvironment node (if linked).
+
 ## Getting Started
 Using FauxGI is simple:
 1. Copy the O1S_FauxGI folder into your own project
 2. "Instantiate Child Scene.." under the top level Node, and select "faux_gi.tscn"
 3. Make sure the scene's geometry has collision shapes and the lights cast shadows
+4. Link a WorldEnvironment node (if present) to the `Environment Node`
 
 You can optionally play with the FauxGI settings while watching the results in the 3D preview window.
 
 ## Principles
 The FauxGI node takes the principles of Godot's [Faking global illumination](https://docs.godotengine.org/en/stable/tutorials/3d/global_illumination/faking_global_illumination.html) page and automates them.
-All light sources in the scene are scanned on _ready().  Then on every _physics_process(), each active light source in the scene can add a Virtual Point Light (VPL) to approximate indirect light.
+All light sources in the scene are scanned on _ready().  Then on every _physics_process(), each active light source in the scene can add a Virtual Point Light (VPL) to approximate the first bounce indirect light.  All VPLs are then processed, weighted by energy and distance to the camera, to simulate secondary bounces using the ambient light term in the `Environment Node`.
 
 Raycasts are used to determine where to place the VPLs, hence the need for collision shapes.  The number of raycasts per VPL is controlled with the `Oversample` setting (with 0 disabling the raycasts entirely, simply placing the VPL at a specific fraction of the way from the light's `Range`).  The more raycasts per VPL, the better they can adapt to the (possibly changing) geometry around them.
 
-Spotlights can control more than one VPL, controlled with the `Per Spot` parameter.  The VPLs will all work the same way, all generated within the spotlight's cone.
+Spotlights can control more than one VPL, controlled with the `VPLs per Spot` parameter.  The VPLs will all work the same way, all generated within the spotlight's cone.
 
-Omnilights look best when using at least 4 VPLs, as the the VPLs can be near multiple surfaces.  If each Omnilight only has a single VPL it is much harder to get bounced light on the back of other objects in the space.  Omnilights are implemented by casting their VPLs as if there were `Per Omni` spotlights radiating outward.
+Omnilights look best when using at least 4 VPLs, as the the VPLs can be near multiple surfaces.  If each Omnilight only has a single VPL it is much harder to get bounced light on the back of other objects in the space.  Omnilights are implemented by casting their VPLs as if there were `VPLs per Omni` spotlights radiating outward.
 
-Directional lights are handled as if the camera itself were an omnilight, finding where to place the `Per Directional` VPLs.  Those VPLs are then all checked to see if the directional lights can reach them, and if so the directional lights contribute the color and energy information to the VPLs.  Currently all directional lights will share the same VPLs, so the name `Per Directional` is no longer correct.
+Directional lights are handled as if the camera itself were an omnilight, finding where to place the `Directional VPLs`.  Those VPLs are then all checked to see if the directional lights can reach them, and if so the directional lights contribute the color and energy information to the VPLs.  Currently all directional lights will share the same VPLs.
 
 FauxGI keeps a pool of VPLs, added via the RenderingServer to minimize overhead (so they do not need to interact with the scene tree).
 
