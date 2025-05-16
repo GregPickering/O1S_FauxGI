@@ -109,6 +109,9 @@ var in_editor : bool = Engine.is_editor_hint()
 @export var environment_node : WorldEnvironment = null
 ## How strong should this effect be
 @export_range( 0.0, 1.0, 0.01 ) var ambient_gain : float = 0.25
+## Do we want a always-on ambient?
+@export_range( 0.0, 0.25, 0.001, "or_greater" ) var base_ambient_energy : float = 0.05
+@export_color_no_alpha var base_ambient_color : Color = Color(1,1,1)
 
 # original light sources in the scene
 var light_sources : Array[ Light3D ] = []
@@ -229,8 +232,11 @@ func _physics_process( _delta ):
 var ambient_energy : float = 0.0
 func disable_ambient_secondaries():
 	if environment_node and environment_node.environment:
-		ambient_energy = 0.0
-		environment_node.environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+		ambient_energy = base_ambient_energy
+		#environment_node.environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+		environment_node.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		environment_node.environment.ambient_light_color = base_ambient_color
+		environment_node.environment.ambient_light_energy = ambient_energy
 
 # cascaded exponential filtering
 var VPL_filt_1 : Dictionary[ Light3D, Dictionary ] = {}
@@ -284,19 +290,19 @@ func filter_and_emit_VPLs():
 				preVPLs.back().get_or_add( ray_storage.color, light.light_color )
 	# and do we want to modify ambient to simulate secondary+ bounces?
 	if environment_node and environment_node.environment and (ambient_gain > 0.0):
-		var global_color := Color(0,0,0,0)
-		var global_energy : float = 0.0
+		var global_color := base_ambient_color * base_ambient_energy
+		var global_energy : float = base_ambient_energy
 		for preVPL in preVPLs:
 			var r : float = 1.0 * preVPL[ ray_storage.rad ]
 			var d : float = _camera.global_position.distance_to( preVPL[ ray_storage.pos ] )
 			if d < r:
-				var e : float = preVPL[ ray_storage.energy ] * sqrt(1.0 - d / r)
+				var e : float = preVPL[ ray_storage.energy ] * sqrt(1.0 - d / r) * ambient_gain
 				global_color += preVPL[ ray_storage.color ] * e
 				global_energy += e
 		# and in case we are updating the environmental ambient...
 		environment_node.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		environment_node.environment.ambient_light_color = global_color / global_energy
-		ambient_energy = global_energy * ambient_gain
+		ambient_energy = global_energy
 		environment_node.environment.ambient_light_energy = ambient_energy
 		#print( global_energy )
 
@@ -651,7 +657,7 @@ func scan_light_sources():
 		light_sources = new_light_sources
 		light_data_stale = true
 		# report
-		print( "Source count is ", light_sources.size() )
+		print( "Source count is ", new_light_sources.size() )
 		print( "VPL max count is ", VPL_light.size() )
 
 func qrnd_distrib( index : int, scale_01 : float = 1.0 ) -> Vector2:

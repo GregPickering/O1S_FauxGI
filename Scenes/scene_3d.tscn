@@ -9,8 +9,8 @@
 
 [sub_resource type="Environment" id="Environment_q5cge"]
 ambient_light_source = 2
-ambient_light_color = Color(0.482959, 0.926722, 0.578115, 1)
-ambient_light_energy = 0.120515
+ambient_light_color = Color(0.925428, 0.847901, 0.958116, 1)
+ambient_light_energy = 0.0807986
 tonemap_mode = 3
 volumetric_fog_density = 0.271
 
@@ -80,12 +80,13 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.80649, -0.955527, -2.43044)
 size = Vector3(15.4212, 0.1, 36.4354)
 
 [node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(-0.270615, 0, -0.962688, 0, 1, 0, 0.962688, 0, -0.270615, 0, 0, 0)
+transform = Transform3D(0.0957024, 0, -0.99541, 0, 1, 0, 0.99541, 0, 0.0957024, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 speed = -1.795
 
 [node name="SpotLight3D" type="SpotLight3D" parent="SpinSpot"]
 transform = Transform3D(0.952537, 0.131593, -0.274512, 0.304381, -0.396676, 0.866026, 0.00507104, -0.908477, -0.417903, 0.79985, 3.19763, -0.713908)
+visible = false
 light_color = Color(0.192157, 1, 0.32549, 1)
 light_energy = 2.0
 shadow_enabled = true
@@ -94,11 +95,12 @@ spot_angle = 30.0
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinSpot"]
 transform = Transform3D(-0.128348, 0, -0.991729, 0, 1, 0, 0.991729, 0, -0.128348, -0.711475, 1.74288, -0.629222)
+visible = false
 light_energy = 1.5
 shadow_enabled = true
 
 [node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(-0.999024, 0, 0.0441728, 0, 1, 0, -0.0441728, 0, -0.999024, 0, 0, 0)
+transform = Transform3D(-0.995421, 0, 0.0955834, 0, 1, 0, -0.0955834, 0, -0.995421, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 speed = 0.42
 
@@ -113,6 +115,7 @@ sky_mode = 1
 
 [node name="OmniLight3D" type="OmniLight3D" parent="SpinDir"]
 transform = Transform3D(-0.859002, 0, 0.511972, 0, 1, 0, -0.511972, 0, -0.859002, 2.056, -0.19, -0.521)
+visible = false
 light_color = Color(1, 0, 0, 1)
 shadow_enabled = true
 omni_range = 3.0
@@ -147,7 +150,7 @@ anchor_right = 1.0
 offset_left = -261.0
 offset_bottom = 23.0
 grow_horizontal = 0
-text = "11 VPL, 0 VDL, 0.1205 amb "
+text = "2 VPL, 0 VDL, 0.0808 amb "
 horizontal_alignment = 1
 
 [node name="RendererLabel" type="Label" parent="UICanvas"]
