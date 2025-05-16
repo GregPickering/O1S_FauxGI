@@ -35,7 +35,7 @@ extends Node3D
 ## VPLs use omni *AND* spot (180 deg), Compatibility's per-mesh limit is "8 spot + 8 omni"
 const VPLs_use_spots : bool = true
 ## Do we want to spawn VPLs for source lights which don't cast shadows?
-const include_shadowless : bool = true
+const include_shadowless : bool = false
 ## Do we want to hotkey GTRL+G to toggle FauxGI?
 const enable_ctrl_g : bool = true
 ## scales all light power
@@ -151,12 +151,17 @@ func _unhandled_key_input( event ):
 			bounce_gain = 1.0 if (bounce_gain < 0.5) else 0.0
 			get_viewport().set_input_as_handled()
 
-# I need to raycast, which happens here in the physics process
+## I need to raycast, which happens here in the physics process
+var rescan_in_n : int = 60 # scan for light changes every second or so
 func _physics_process( _delta ):
+	rescan_in_n -= 1
+	if in_editor or rescan_in_n <= 0:
+		rescan_in_n = randi_range( 30, 90 )
+		allocate_VPLs( max_vpls )
+		allocate_VDLs( max_directionals )
+		scan_light_sources()
 	active_VPLs = 0
 	active_VDLs = 0
-	allocate_VPLs( max_vpls )
-	allocate_VDLs( max_directionals )
 	raycast_hits.clear()
 	raycast_misses.clear()
 	if bounce_gain >= 0.01:
@@ -620,6 +625,10 @@ func _ready():
 		_camera = get_viewport().get_camera_3d()
 	# set up for raycasts (which are all in global space)
 	space_state = get_world_3d().direct_space_state
+	# and get our initial set of light sources
+	scan_light_sources()
+
+func scan_light_sources():
 	# find all possible source lights
 	var source_nodes : Array[ Node ]
 	if top_node:
@@ -630,12 +639,17 @@ func _ready():
 		var parent = get_parent()
 		if parent:
 			source_nodes = parent.find_children("", "Light3D" )
+	var new_light_sources : Array[ Light3D ] = []
 	if source_nodes:
 		# store all vetted light sources
 		for sn_light : Light3D in source_nodes:
 			# maybe only look at lights which cast shadows
 			if sn_light.shadow_enabled or include_shadowless:
-				light_sources.push_back( sn_light )
+				new_light_sources.push_back( sn_light )
+	if new_light_sources != light_sources:
+		# something is different!
+		light_sources = new_light_sources
+		light_data_stale = true
 		# report
 		print( "Source count is ", light_sources.size() )
 		print( "VPL max count is ", VPL_light.size() )
