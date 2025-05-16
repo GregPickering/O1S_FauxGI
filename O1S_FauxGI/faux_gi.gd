@@ -34,6 +34,8 @@ extends Node3D
 
 ## VPLs use omni *AND* spot (180 deg), Compatibility's per-mesh limit is "8 spot + 8 omni"
 const VPLs_use_spots : bool = true
+## VPLs  cast shadows; if you enable, slower and VPLs_use_spots should be false
+const VPLS_cast_shadows : bool = false
 ## Do we want to spawn VPLs for source lights which don't cast shadows?
 const include_shadowless : bool = false
 ## Do we want to hotkey GTRL+G to toggle FauxGI?
@@ -703,6 +705,10 @@ func allocate_VPLs( N : int ):
 			RenderingServer.light_set_param( light, RenderingServer.LIGHT_PARAM_SPECULAR, 0.0 )
 			if spot_instead:
 				RenderingServer.light_set_param( light, RenderingServer.LIGHT_PARAM_SPOT_ANGLE, 180.0 )
+			if VPLS_cast_shadows:
+				if not spot_instead:
+					RenderingServer.light_omni_set_shadow_mode( light, RenderingServer.LIGHT_OMNI_SHADOW_CUBE )
+				RenderingServer.light_set_shadow( light, true )
 			# keep a copy around
 			VPL_inst.append( instance )
 			VPL_light.append( light )
