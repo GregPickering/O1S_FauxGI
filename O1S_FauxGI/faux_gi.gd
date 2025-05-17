@@ -160,7 +160,7 @@ func _unhandled_key_input( event ):
 var rescan_in_n : int = 60 # scan for light changes every second or so
 func _physics_process( _delta ):
 	rescan_in_n -= 1
-	if in_editor or rescan_in_n <= 0:
+	if in_editor or (rescan_in_n <= 0):
 		rescan_in_n = randi_range( 30, 90 )
 		allocate_VPLs( max_vpls )
 		allocate_VDLs( max_directionals )
@@ -169,7 +169,8 @@ func _physics_process( _delta ):
 	active_VDLs = 0
 	raycast_hits.clear()
 	raycast_misses.clear()
-	if bounce_gain >= 0.01:
+	var vis : bool = is_visible_in_tree()
+	if (bounce_gain >= 0.01) and vis:
 		# do I need to refresh all light data?
 		if light_data_stale:
 			VPL_targets = {}
@@ -191,7 +192,7 @@ func _physics_process( _delta ):
 	else:
 		VPL_targets.clear()
 	
-	if (bounce_gain < 0.01) or (ambient_gain < 0.01):
+	if (bounce_gain < 0.01) or (ambient_gain < 0.01) or not vis:
 		disable_ambient_secondaries()
 	
 	# the user may wish to display raycasts
@@ -303,7 +304,7 @@ func filter_and_emit_VPLs():
 				global_energy += e
 		# and in case we are updating the environmental ambient...
 		environment_node.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-		environment_node.environment.ambient_light_color = global_color / global_energy
+		environment_node.environment.ambient_light_color = global_color if (global_energy == 0.0) else (global_color / global_energy)
 		ambient_energy = global_energy
 		environment_node.environment.ambient_light_energy = ambient_energy
 		#print( global_energy )
@@ -400,7 +401,7 @@ func process_rays_average( from : Vector3, rays : PackedVector3Array ) -> Dictio
 					for key in ray_res:
 						avg_ray_res[ key ] += ray_res[ key ]
 	if avg_ray_res:
-		# divide by energy
+		# divide by sum_energy, which had to be > 0 to create avg_ray_res
 		var gain = 1.0 / sum_energy
 		avg_ray_res[ ray_storage.pos ] *= gain
 		avg_ray_res[ ray_storage.norm ] *= gain
@@ -409,32 +410,32 @@ func process_rays_average( from : Vector3, rays : PackedVector3Array ) -> Dictio
 		avg_ray_res[ ray_storage.energy ] = sum_energy / rays.size()
 	return avg_ray_res
 
-func raycast_average( rays_from_to : PackedVector3Array, 
-			target : Vector3, look : Vector3, 
-			dist : float ) -> Dictionary:
-	var avg_ray_res : Dictionary
-	var sum_score : float = 0.0
-	for ray_idx in range( 0, rays_from_to.size(), 2 ):
-		var res_ray := raycast( rays_from_to[ ray_idx ], rays_from_to[ ray_idx + 1 ] )
-		if res_ray:
-			var score : float = lerpf( 1.0, 0.1, clamp( 
-					target.distance_to( res_ray.position ) / dist, 0.0, 1.0 ) )
-			score *= max( 0.0, look.dot( res_ray.position - target ) )
-			if (score > 0.0) and (look.dot( res_ray.normal ) < 0.0):
-				sum_score += score
-				if avg_ray_res:
-					avg_ray_res[ ray_storage.pos ] += res_ray.position * score
-					avg_ray_res[ ray_storage.norm ] += res_ray.normal * score
-				else:
-					avg_ray_res[ ray_storage.pos ] = res_ray.position * score
-					avg_ray_res[ ray_storage.norm ] = res_ray.normal * score
-	if avg_ray_res:
-		avg_ray_res[ ray_storage.energy ] = 2.0 * sum_score / rays_from_to.size()
-		avg_ray_res[ ray_storage.pos ] /= sum_score
-		avg_ray_res[ ray_storage.norm ] /= sum_score
-		# debug
-		$DirCastDebug.global_position = avg_ray_res[ ray_storage.pos ]
-	return avg_ray_res
+#func raycast_average( rays_from_to : PackedVector3Array, 
+			#target : Vector3, look : Vector3, 
+			#dist : float ) -> Dictionary:
+	#var avg_ray_res : Dictionary
+	#var sum_score : float = 0.0
+	#for ray_idx in range( 0, rays_from_to.size(), 2 ):
+		#var res_ray := raycast( rays_from_to[ ray_idx ], rays_from_to[ ray_idx + 1 ] )
+		#if res_ray:
+			#var score : float = lerpf( 1.0, 0.1, clamp( 
+					#target.distance_to( res_ray.position ) / dist, 0.0, 1.0 ) )
+			#score *= max( 0.0, look.dot( res_ray.position - target ) )
+			#if (score > 0.0) and (look.dot( res_ray.normal ) < 0.0):
+				#sum_score += score
+				#if avg_ray_res:
+					#avg_ray_res[ ray_storage.pos ] += res_ray.position * score
+					#avg_ray_res[ ray_storage.norm ] += res_ray.normal * score
+				#else:
+					#avg_ray_res[ ray_storage.pos ] = res_ray.position * score
+					#avg_ray_res[ ray_storage.norm ] = res_ray.normal * score
+	#if avg_ray_res:
+		#avg_ray_res[ ray_storage.energy ] = 2.0 * sum_score / rays_from_to.size()
+		#avg_ray_res[ ray_storage.pos ] /= sum_score
+		#avg_ray_res[ ray_storage.norm ] /= sum_score
+		## debug
+		#$DirCastDebug.global_position = avg_ray_res[ ray_storage.pos ]
+	#return avg_ray_res
 	
 func jitter_ray_angle(	ray : Vector3, N : int, deg : float, 
 						percent_quasirandom : float = percent_stable ) -> PackedVector3Array:
