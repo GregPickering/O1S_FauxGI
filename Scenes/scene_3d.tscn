@@ -9,8 +9,8 @@
 
 [sub_resource type="Environment" id="Environment_q5cge"]
 ambient_light_source = 2
-ambient_light_color = Color(0.807012, 0.949151, 0.845678, 1)
-ambient_light_energy = 0.0849945
+ambient_light_color = Color(0.65167, 0.942439, 0.716874, 1)
+ambient_light_energy = 0.165498
 tonemap_mode = 3
 volumetric_fog_density = 0.271
 
@@ -22,19 +22,54 @@ albedo_color = Color(1, 0.635294, 0.105882, 1)
 
 [node name="Scene3D" type="Node3D"]
 
-[node name="FauxGI" parent="." node_paths=PackedStringArray("top_node", "label_node", "environment_node") instance=ExtResource("1_q5cge")]
-top_node = NodePath("..")
-label_node = NodePath("../UICanvas/FauxGIStatusLabel")
-oversample_dir = 32
-environment_node = NodePath("../WorldEnvironment")
-metadata/_edit_group_ = true
-
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_q5cge")
 
-[node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(0.538808, -0.388396, 0.747552, 0, 0.887378, 0.461043, -0.842429, -0.248414, 0.478127, 3.0704, 3.96238, 2.2976)
-script = ExtResource("2_pjwey")
+[node name="FauxGI" parent="." node_paths=PackedStringArray("top_node", "label_node", "environment_node") instance=ExtResource("1_q5cge")]
+top_node = NodePath("..")
+label_node = NodePath("../UICanvas/FauxGIStatusLabel")
+bounce_gain = 1.0
+percent_stable = 75.0
+temporal_filter = 0.1
+environment_node = NodePath("../WorldEnvironment")
+
+[node name="SpinSpot" type="Node3D" parent="."]
+transform = Transform3D(-0.879026, 0, -0.476774, 0, 1, 0, 0.476774, 0, -0.879026, 0, 0, 0)
+script = ExtResource("3_ok1gl")
+speed = -1.795
+
+[node name="SpotLight3D" type="SpotLight3D" parent="SpinSpot"]
+transform = Transform3D(0.952537, 0.131593, -0.274512, 0.304381, -0.396676, 0.866026, 0.00507104, -0.908477, -0.417903, 0.79985, 3.19763, -0.713908)
+light_color = Color(0.192157, 1, 0.32549, 1)
+light_energy = 2.0
+shadow_enabled = true
+spot_range = 10.0
+spot_angle = 30.0
+
+[node name="OmniLight3D" type="OmniLight3D" parent="SpinSpot"]
+transform = Transform3D(-0.128348, 0, -0.991729, 0, 1, 0, 0.991729, 0, -0.128348, -0.711475, 1.74288, -0.629222)
+light_energy = 1.5
+shadow_enabled = true
+
+[node name="SpinDir" type="Node3D" parent="."]
+transform = Transform3D(0.243981, 0, 0.96978, 0, 1, 0, -0.96978, 0, 0.243981, 0, 0, 0)
+script = ExtResource("3_ok1gl")
+speed = 0.42
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="SpinDir"]
+transform = Transform3D(0.982008, -0.188398, 0.0128751, 0.0752052, 0.452719, 0.888476, -0.173216, -0.871523, 0.458742, 0, 2, 0)
+light_color = Color(0.804364, 0.600976, 0.890119, 1)
+shadow_enabled = true
+directional_shadow_mode = 0
+directional_shadow_max_distance = 15.0
+directional_shadow_pancake_size = 0.0
+sky_mode = 1
+
+[node name="OmniLight3D" type="OmniLight3D" parent="SpinDir"]
+transform = Transform3D(-0.859002, 0, 0.511972, 0, 1, 0, -0.511972, 0, -0.859002, 2.056, -0.19, -0.521)
+light_color = Color(1, 0, 0, 1)
+shadow_enabled = true
+omni_range = 3.0
 
 [node name="Geometry" type="CSGCombiner3D" parent="."]
 use_collision = true
@@ -78,44 +113,6 @@ metadata/_edit_group_ = true
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.80649, -0.955527, -2.43044)
 size = Vector3(15.4212, 0.1, 36.4354)
 
-[node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(0.847151, 0, -0.531352, 0, 1, 0, 0.531352, 0, 0.847151, 0, 0, 0)
-script = ExtResource("3_ok1gl")
-speed = -1.795
-
-[node name="SpotLight3D" type="SpotLight3D" parent="SpinSpot"]
-transform = Transform3D(0.952537, 0.131593, -0.274512, 0.304381, -0.396676, 0.866026, 0.00507104, -0.908477, -0.417903, 0.79985, 3.19763, -0.713908)
-light_color = Color(0.192157, 1, 0.32549, 1)
-light_energy = 2.0
-shadow_enabled = true
-spot_range = 10.0
-spot_angle = 30.0
-
-[node name="OmniLight3D" type="OmniLight3D" parent="SpinSpot"]
-transform = Transform3D(-0.128348, 0, -0.991729, 0, 1, 0, 0.991729, 0, -0.128348, -0.711475, 1.74288, -0.629222)
-light_energy = 1.5
-shadow_enabled = true
-
-[node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(0.207609, 0, 0.978212, 0, 1, 0, -0.978212, 0, 0.207609, 0, 0, 0)
-script = ExtResource("3_ok1gl")
-speed = 0.42
-
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="SpinDir"]
-transform = Transform3D(0.982008, -0.188398, 0.0128751, 0.0752052, 0.452719, 0.888476, -0.173216, -0.871523, 0.458742, 0, 2, 0)
-light_color = Color(0.804364, 0.600976, 0.890119, 1)
-shadow_enabled = true
-directional_shadow_mode = 0
-directional_shadow_max_distance = 15.0
-directional_shadow_pancake_size = 0.0
-sky_mode = 1
-
-[node name="OmniLight3D" type="OmniLight3D" parent="SpinDir"]
-transform = Transform3D(-0.859002, 0, 0.511972, 0, 1, 0, -0.511972, 0, -0.859002, 2.056, -0.19, -0.521)
-light_color = Color(1, 0, 0, 1)
-shadow_enabled = true
-omni_range = 3.0
-
 [node name="UICanvas" type="CanvasLayer" parent="."]
 
 [node name="FPS" type="Label" parent="UICanvas"]
@@ -146,7 +143,7 @@ anchor_right = 1.0
 offset_left = -261.0
 offset_bottom = 23.0
 grow_horizontal = 0
-text = "11 VPL, 0 VDL, 0.0850 amb "
+text = "11 VPL, 0 VDL, 0.1655 amb "
 horizontal_alignment = 1
 
 [node name="RendererLabel" type="Label" parent="UICanvas"]
@@ -161,5 +158,9 @@ grow_horizontal = 0
 text = "Renderer"
 horizontal_alignment = 1
 script = ExtResource("7_pjwey")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(0.538808, -0.388396, 0.747553, 0, 0.887378, 0.461043, -0.842429, -0.248414, 0.478126, 3.0704, 3.96238, 2.2976)
+script = ExtResource("2_pjwey")
 
 [connection signal="toggled" from="UICanvas/cbVSync" to="UICanvas/cbVSync" method="_on_toggled"]

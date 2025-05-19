@@ -48,9 +48,6 @@ const vpl_energy_floor : float = 1e-5
 const ray_hit_color := Color.LIGHT_GREEN
 const ray_miss_color := Color.LIGHT_CORAL
 
-# are we running in the editor
-var in_editor : bool = Engine.is_editor_hint()
-
 @export_category( "Scene Integration" )
 ## The node containing all the lights we wish to GI-ify
 @export var top_node : Node3D = null
@@ -143,11 +140,16 @@ var _camera : Camera3D = null
 var query := PhysicsRayQueryParameters3D.new()
 var space_state : PhysicsDirectSpaceState3D = null
 enum ray_storage { energy, pos, norm, rad, color, dist_frac }
+enum renderer_type { forward_plus, mobile, gl_compatibility }
 
 # debug raycasts
 var raycast_hits : PackedVector3Array = []
 var raycast_misses : PackedVector3Array = []
 @onready var draw_rays : ImmediateMesh = $RaycastDebug.mesh
+
+# are we running in the editor
+var in_editor : bool = Engine.is_editor_hint()
+var render : renderer_type = renderer_type.get( RenderingServer.get_current_rendering_method() )
 
 func _unhandled_key_input( event ):
 	# add the hotkey CTRL+G to toggle global illumination
@@ -625,6 +627,7 @@ func process_omni( light : Light3D ):
 			light.light_energy * bounce_gain * scale_all_light_energy * compensate_N_pts )
 
 func _ready():
+	print( "Renderer: ", render )
 	# grab the camera
 	if in_editor:
 		# Get EditorInterface this way because it does not exist in a build
@@ -708,7 +711,14 @@ func allocate_VPLs( N : int ):
 				RenderingServer.light_set_param( light, RenderingServer.LIGHT_PARAM_SPOT_ANGLE, 180.0 )
 			if VPLS_cast_shadows:
 				if not spot_instead:
-					RenderingServer.light_omni_set_shadow_mode( light, RenderingServer.LIGHT_OMNI_SHADOW_CUBE )
+					if renderer_type.gl_compatibility == render:
+						# the compatibility renderer can't do DUAL_PARABOLOID
+						RenderingServer.light_omni_set_shadow_mode( light, 
+											RenderingServer.LIGHT_OMNI_SHADOW_CUBE )
+					else:
+						# DUAL_PARABOLOID is faster, if supported
+						RenderingServer.light_omni_set_shadow_mode( light, 
+											RenderingServer.LIGHT_OMNI_SHADOW_DUAL_PARABOLOID )
 				RenderingServer.light_set_shadow( light, true )
 			# keep a copy around
 			VPL_inst.append( instance )
