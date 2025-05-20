@@ -47,6 +47,7 @@ const vpl_energy_floor : float = 1e-5
 ## the colors for visualizing raycasts
 const ray_hit_color := Color.LIGHT_GREEN
 const ray_miss_color := Color.LIGHT_CORAL
+const vpl_vis_color := Color.RED
 
 @export_category( "Scene Integration" )
 ## The node containing all the lights we wish to GI-ify
@@ -64,6 +65,8 @@ const ray_miss_color := Color.LIGHT_CORAL
 @export_range( 0.0, 100.0, 0.1 ) var percent_stable : float = 100.0
 ## Visualize the raycasts?
 @export var show_raycasts : bool = false
+## Visualize the VPLs?
+@export var show_vpls : bool = false
 
 @export_category( "Spot & Omni Lights" )
 ## How many VPLs to generate per source SpotLight3D, 1+
@@ -78,6 +81,8 @@ const ray_miss_color := Color.LIGHT_CORAL
 			light_data_stale = true
 ## How many raycasts per VPL per _physics_process for spot and omni lights, 0+
 @export_range( 0, 100 ) var oversample : int = 8
+## Median-of-3 filtering
+@export var median_of_3 : bool = false
 ## Filter the VPLs over time (0=never update/infinite filtering, 1=instant update/no filtering)
 @export_range( 0.01, 1.0, 0.005, "exp") var temporal_filter : float = 0.5
 ## place the VPL (0=at light origin, 1=at intersection)
@@ -142,12 +147,13 @@ var space_state : PhysicsDirectSpaceState3D = null
 enum ray_storage { energy, pos, norm, rad, color, dist_frac }
 enum renderer_type { forward_plus, mobile, gl_compatibility }
 
-# debug raycasts
+# visualize raycasts and VPL positions for debug
 var raycast_hits : PackedVector3Array = []
 var raycast_misses : PackedVector3Array = []
+var vpl_markers : PackedVector3Array = []
 @onready var draw_rays : ImmediateMesh = $RaycastDebug.mesh
 
-# are we running in the editor
+# info on how this is being used, these won't change during runtime
 var in_editor : bool = Engine.is_editor_hint()
 var render : renderer_type = renderer_type.get( RenderingServer.get_current_rendering_method() )
 
@@ -171,6 +177,7 @@ func _physics_process( _delta ):
 	active_VDLs = 0
 	raycast_hits.clear()
 	raycast_misses.clear()
+	vpl_markers.clear()
 	var vis : bool = is_visible_in_tree()
 	if (bounce_gain >= 0.01) and vis:
 		# do I need to refresh all light data?
@@ -199,19 +206,24 @@ func _physics_process( _delta ):
 	
 	# the user may wish to display raycasts
 	draw_rays.clear_surfaces()
-	if show_raycasts:
-		if not raycast_hits.is_empty():
-			draw_rays.surface_begin( Mesh.PRIMITIVE_LINES )
-			for rce in raycast_hits:
-				draw_rays.surface_add_vertex( rce )
-			draw_rays.surface_set_color( ray_hit_color )
-			draw_rays.surface_end()
-		if not raycast_misses.is_empty():
-			draw_rays.surface_begin( Mesh.PRIMITIVE_LINES )
-			for rce in raycast_misses:
-				draw_rays.surface_add_vertex( rce )
-			draw_rays.surface_set_color( ray_miss_color )
-			draw_rays.surface_end()
+	if not raycast_hits.is_empty():
+		draw_rays.surface_begin( Mesh.PRIMITIVE_LINES )
+		for rce in raycast_hits:
+			draw_rays.surface_add_vertex( rce )
+		draw_rays.surface_set_color( ray_hit_color )
+		draw_rays.surface_end()
+	if not raycast_misses.is_empty():
+		draw_rays.surface_begin( Mesh.PRIMITIVE_LINES )
+		for rce in raycast_misses:
+			draw_rays.surface_add_vertex( rce )
+		draw_rays.surface_set_color( ray_miss_color )
+		draw_rays.surface_end()
+	if not vpl_markers.is_empty():
+		draw_rays.surface_begin( Mesh.PRIMITIVE_LINES )
+		for vplm in vpl_markers:
+			draw_rays.surface_add_vertex( vplm )
+		draw_rays.surface_set_color( vpl_vis_color )
+		draw_rays.surface_end()
 	# deactivate any VPLs that need it
 	if active_VPLs < last_active_VPLs:
 		for idx in range( active_VPLs, last_active_VPLs ):
@@ -243,6 +255,9 @@ func disable_ambient_secondaries():
 		environment_node.environment.ambient_light_color = base_ambient_color
 		environment_node.environment.ambient_light_energy = ambient_energy
 
+# median-of-3 filtering
+var VPL_med_1 : Dictionary[ Light3D, Dictionary ] = {}
+var VPL_med_2 : Dictionary[ Light3D, Dictionary ] = {}
 # cascaded exponential filtering
 var VPL_filt_1 : Dictionary[ Light3D, Dictionary ] = {}
 var VPL_filt_2 : Dictionary[ Light3D, Dictionary ] = {}
@@ -250,12 +265,16 @@ var VPL_filt_3 : Dictionary[ Light3D, Dictionary ] = {}
 
 func erase_light_data( light : Light3D ):
 	VPL_targets.erase( light )
+	VPL_med_1.erase( light )
+	VPL_med_2.erase( light )
 	VPL_filt_1.erase( light )
 	VPL_filt_2.erase( light )
 	VPL_filt_3.erase( light )
 
 func filter_and_emit_VPLs():
 	if light_data_stale:
+		VPL_med_1.clear()
+		VPL_med_2.clear()
 		VPL_filt_1.clear()
 		VPL_filt_2.clear()
 		VPL_filt_3.clear()
@@ -263,19 +282,42 @@ func filter_and_emit_VPLs():
 	# cascaded exponential filtering
 	for light in VPL_targets:
 		if not VPL_filt_1.has( light ):
+			VPL_med_1[ light ] = VPL_targets[ light ].duplicate( true )
+			VPL_med_2[ light ] = VPL_targets[ light ].duplicate( true )
 			VPL_filt_1[ light ] = VPL_targets[ light ].duplicate( true )
 			VPL_filt_2[ light ] = VPL_targets[ light ].duplicate( true )
 			VPL_filt_3[ light ] = VPL_targets[ light ].duplicate( true )
 		for idx in VPL_targets[ light ]:
 			if not VPL_filt_1[ light ].has( idx ):
+				VPL_med_1[ light ][ idx ] = VPL_targets[ light ][ idx ].duplicate( true )
+				VPL_med_2[ light ][ idx ] = VPL_targets[ light ][ idx ].duplicate( true )
 				VPL_filt_1[ light ][ idx ] = VPL_targets[ light ][ idx ].duplicate( true )
 				VPL_filt_2[ light ][ idx ] = VPL_targets[ light ][ idx ].duplicate( true )
 				VPL_filt_3[ light ][ idx ] = VPL_targets[ light ][ idx ].duplicate( true )
 			for key in VPL_targets[ light ][ idx ]:
+				# median of 3
+				var newval = VPL_targets[ light ][ idx ][ key ]
+				if median_of_3:
+					# local copies
+					var m1 = VPL_med_1[ light ][ idx ][ key ]
+					var m2 = VPL_med_2[ light ][ idx ][ key ]
+					# update history
+					VPL_med_2[ light ][ idx ][ key ] = m1
+					VPL_med_1[ light ][ idx ][ key ] = newval
+					# filter
+					match typeof( newval ):
+						TYPE_FLOAT:
+							newval = (newval + m1 + m2 -
+								max( max( newval, m1 ), m2 ) -
+								min( min( newval, m1 ), m2 ) )
+						TYPE_VECTOR3:
+							newval = (newval + m1 + m2 -
+								newval.max( m1 ).max( m2 ) -
+								newval.min( m1 ).min( m2 ) )
 				# cascade in reverse order
 				VPL_filt_3[ light ][ idx ][ key ] = lerp(
 						VPL_filt_3[ light ][ idx ][ key ], 
-						VPL_targets[ light ][ idx ][ key ],
+						newval, #VPL_targets[ light ][ idx ][ key ],
 						temporal_filter )
 				VPL_filt_2[ light ][ idx ][ key ] = lerp(
 						VPL_filt_2[ light ][ idx ][ key ], 
@@ -332,6 +374,17 @@ func filter_and_emit_VPLs():
 			avg_VPL[ ray_storage.energy ] = sum_energy
 		# just throw away the rest
 		preVPLs.resize( max_vpls )
+	# debug?
+	if show_vpls:
+		for preVPL in preVPLs:
+			var mid = to_local( preVPL[ ray_storage.pos ] )
+			var r = preVPL[ ray_storage.rad ] * 0.1
+			vpl_markers.push_back( mid + Vector3( -r,0,0 ) )
+			vpl_markers.push_back( mid + Vector3( +r,0,0 ) )
+			vpl_markers.push_back( mid + Vector3( 0,-r,0 ) )
+			vpl_markers.push_back( mid + Vector3( 0,+r,0 ) )
+			vpl_markers.push_back( mid + Vector3( 0,0,-r ) )
+			vpl_markers.push_back( mid + Vector3( 0,0,+r ) )
 	# finally add the VPLs
 	active_VPLs = 0
 	for preVPL in preVPLs:
