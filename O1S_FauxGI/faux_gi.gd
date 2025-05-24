@@ -41,7 +41,7 @@ const include_shadowless : bool = false
 ## Do we want to hotkey GTRL+G to toggle FauxGI?
 const enable_ctrl_g : bool = true
 ## scales all light power
-const scale_all_light_energy : float = 0.25
+const scale_all_light_energy : float = 1.0
 ## ignore any VPLs with negligible energy
 const vpl_energy_floor : float = 1e-5
 ## the colors for visualizing raycasts
@@ -67,6 +67,14 @@ const vpl_vis_color := Color.RED
 @export var show_raycasts : bool = false
 ## Visualize the VPLs?
 @export var show_vpls : bool = false
+
+@export_category( "Optimization" )
+## Don't create VPLs if the source light is farther than this
+@export var max_source_dist : float = 20.0
+## Don't create VPLs if the source light is farther than this from the view volume
+@export var expand_view_volume : float = 2.0
+## Fade in lights' contributions as it approaches the view volume
+@export var fade_in_dist : float = 2.0
 
 @export_category( "Spot & Omni Lights" )
 ## How many VPLs to generate per source SpotLight3D, 1+
@@ -141,10 +149,12 @@ var active_VDLs : int = 0
 # know where the camera is
 var _camera : Camera3D = null
 
+var fauxgi_time_s : float = 0.0
+
 # physics stuff
 var query := PhysicsRayQueryParameters3D.new()
 var space_state : PhysicsDirectSpaceState3D = null
-enum ray_storage { energy, pos, norm, rad, color, dist_frac }
+enum ray_storage { energy, pos, norm, rad, color, dist_frac, sort_score }
 enum renderer_type { forward_plus, mobile, gl_compatibility }
 
 # visualize raycasts and VPL positions for debug
@@ -164,15 +174,25 @@ func _unhandled_key_input( event ):
 			bounce_gain = 1.0 if (bounce_gain < 0.5) else 0.0
 			get_viewport().set_input_as_handled()
 
+#func test_early_exit() -> bool:
+	#print( "eval" )
+	#return true
+
 ## I need to raycast, which happens here in the physics process
 var rescan_in_n : int = 60 # scan for light changes every second or so
 func _physics_process( _delta ):
+	var ts_in_us : int = Time.get_ticks_usec()
+	var ts_physics : int = ts_in_us
 	rescan_in_n -= 1
 	if in_editor or (rescan_in_n <= 0):
 		rescan_in_n = randi_range( 30, 90 )
 		allocate_VPLs( max_vpls )
 		allocate_VDLs( max_directionals )
 		scan_light_sources()
+		#if true or test_early_exit():
+			#print( "scan" )
+		#if fauxgi_time_s > 0.02:
+			#print( "%1.3f [s]" % fauxgi_time_s )
 	active_VPLs = 0
 	active_VDLs = 0
 	raycast_hits.clear()
@@ -183,19 +203,41 @@ func _physics_process( _delta ):
 		# do I need to refresh all light data?
 		if light_data_stale:
 			VPL_targets = {}
+		# info from the camera
+		var cam_planes := _camera.get_frustum()
+		var cam_pos : Vector3 = _camera.global_position
 		# now run through all active light sources in the scene
 		var active_dir_lights : Array[ DirectionalLight3D ]
 		for light in light_sources:
-			if light.is_visible_in_tree() and (light.light_energy > 0.0):
+			var use_light : bool = (light.light_energy > 0.0) and light.is_visible_in_tree()
+			var fade_factor : float = 1.0
+			if use_light and (light.get_class() != "DirectionalLight3D"):
+				# Omni and Spotlights have to do a position check too
+				#var light_range : float = 0.0
+				#if light.get_class() == "OmniLight3D":
+					#light_range = light.omni_range
+				#else:
+					#light_range = light.spot_range
+				var light_pos : Vector3 = light.global_position
+				var dist_outside_view : float = cam_pos.distance_to( light_pos ) - max_source_dist
+				for plane_idx in range( 2, 6 ):
+					dist_outside_view = max( dist_outside_view,
+							cam_planes[ plane_idx ].distance_to( light_pos ) - expand_view_volume )
+				use_light = (dist_outside_view <= fade_in_dist)
+				if use_light and (dist_outside_view > 0.0):
+					fade_factor = 1.0 - dist_outside_view / fade_in_dist
+			if use_light:
 				VPL_targets.get_or_add( light, {} )
 				match light.get_class():
 					"DirectionalLight3D": active_dir_lights.push_back( light )
-					"OmniLight3D": process_omni( light )
-					"SpotLight3D": process_spot( light )
+					"OmniLight3D": process_omni( light, fade_factor )
+					"SpotLight3D": process_spot( light, fade_factor )
 			else:
 				erase_light_data( light )
 		# Directional lights
 		handle_all_directional_lights( active_dir_lights )
+		# done with physics raycasts
+		ts_physics = Time.get_ticks_usec()
 		# do something with that info
 		filter_and_emit_VPLs()
 	else:
@@ -230,14 +272,14 @@ func _physics_process( _delta ):
 			disable_VPL( idx )
 	if last_active_VPLs != active_VPLs:
 		last_active_VPLs = active_VPLs
-		print( last_active_VPLs, " active VPLs" )
+		#print( last_active_VPLs, " active VPLs" )
 	# same for VDLs
 	if active_VDLs < last_active_VDLs:
 		for idx in range( active_VDLs, last_active_VDLs ):
 			disable_VDL( idx )
 	if last_active_VDLs != active_VDLs:
 		last_active_VDLs = active_VDLs
-		print( last_active_VDLs, " active VDLs" )
+		#print( last_active_VDLs, " active VDLs" )
 	# status?
 	if label_node:
 		if bounce_gain < 0.01:
@@ -245,6 +287,11 @@ func _physics_process( _delta ):
 		else:
 			label_node.text = ("%d VPL, %d VDL, %1.4f amb " % 
 				[ active_VPLs, active_VDLs, ambient_energy ] )
+	
+	# how long did that take me?
+	var time_physics_s : float = (ts_physics - ts_in_us) * 1e-6
+	var time_vpls_s : float = (Time.get_ticks_usec() - ts_physics) * 1e-6
+	fauxgi_time_s = lerpf( fauxgi_time_s, time_physics_s + time_vpls_s, 0.1 )
 
 var ambient_energy : float = 0.0
 func disable_ambient_secondaries():
@@ -332,9 +379,16 @@ func filter_and_emit_VPLs():
 	for light in VPL_targets:
 		for idx in VPL_targets[ light ]:
 			if VPL_filt_1[ light ][ idx ][ ray_storage.energy ] > vpl_energy_floor:
-				preVPLs.push_back( VPL_filt_1[ light ][ idx ] )
+				# get an actual copy, then modify that copy
+				var preVPL : Dictionary = VPL_filt_1[ light ][ idx ].duplicate( true )
 				# directional VPLs already have a color, but the token directional light does not
-				preVPLs.back().get_or_add( ray_storage.color, light.light_color )
+				preVPL.get_or_add( ray_storage.color, light.light_color )
+				# how do we want to sort?
+				#preVPL[ ray_storage.sort_score ] = (preVPL[ ray_storage.energy ]
+						#/( 1.0 + preVPL[ ray_storage.pos ].distance_squared_to( _camera.global_position ) ) )
+				preVPL[ ray_storage.sort_score ] = -preVPL[ ray_storage.pos ].distance_squared_to( _camera.global_position )
+				# keep it
+				preVPLs.push_back( preVPL )
 	# and do we want to modify ambient to simulate secondary+ bounces?
 	if environment_node and environment_node.environment and (ambient_gain > 0.0):
 		var global_color := base_ambient_color * base_ambient_energy
@@ -356,7 +410,7 @@ func filter_and_emit_VPLs():
 	# Do we need a second pass to filter out the top N VPLs?
 	if preVPLs.size() > max_vpls:
 		# sort most to least energetic
-		preVPLs.sort_custom( func(a, b): return a[ ray_storage.energy ] > b[ ray_storage.energy ] )
+		preVPLs.sort_custom( func(a, b): return a[ ray_storage.sort_score ] > b[ ray_storage.sort_score ] )
 		# do I want to average all the lights that will get cut?
 		if true:
 			var avg_VPL : Dictionary = preVPLs[ 0 ]
@@ -371,7 +425,7 @@ func filter_and_emit_VPLs():
 			var gain : float = 1.0 / sum_energy
 			for key in avg_VPL:
 				avg_VPL[ key ] *= gain
-			avg_VPL[ ray_storage.energy ] = sum_energy
+			avg_VPL[ ray_storage.energy ] = sum_energy / (preVPLs.size() + 1 - max_vpls)
 		# just throw away the rest
 		preVPLs.resize( max_vpls )
 	# debug?
@@ -660,15 +714,15 @@ func trivial_directional( light : Light3D ):
 	config_VDL( active_VDLs, light.global_basis.z, light.light_color, e )
 	active_VDLs += 1
 
-func process_spot( light : Light3D ):
+func process_spot( light : Light3D, fade_factor : float = 1.0 ):
 	var compensate_N_pts : float = 1.0 / vpls_per_spot
 	# these rays never use real random jitter
 	var rays := jitter_ray_angle( -light.spot_range * light.global_basis.z, 
 									vpls_per_spot, light.spot_angle, 100.0 )
 	process_light_rays( light, rays, light.spot_angle * sqrt( compensate_N_pts ), 
-		light.light_energy * bounce_gain * scale_all_light_energy * compensate_N_pts )
+		light.light_energy * bounce_gain * scale_all_light_energy * compensate_N_pts * fade_factor )
 
-func process_omni( light : Light3D ):
+func process_omni( light : Light3D, fade_factor : float = 1.0 ):
 	# where do I want to cast rays, and size them correctly
 	var rays := distribute_omni_rays( vpls_per_omni )
 	for i in rays.size():
@@ -677,7 +731,7 @@ func process_omni( light : Light3D ):
 	var compensate_N_pts : float = 1.0 / rays.size()
 	var angle_deg : float = sqrt( 14400.0 * compensate_N_pts )
 	process_light_rays( light, rays, angle_deg, 
-			light.light_energy * bounce_gain * scale_all_light_energy * compensate_N_pts )
+			light.light_energy * bounce_gain * scale_all_light_energy * compensate_N_pts * fade_factor )
 
 func _ready():
 	print( "Renderer: ", render )
@@ -694,16 +748,18 @@ func _ready():
 	scan_light_sources()
 
 func scan_light_sources():
-	# find all possible source lights
+	# find all possible source lights (they don't need to be owned, so I can get procedural ones)
+	const sources_must_be_owned := false
+	const recursive_search := true
 	var source_nodes : Array[ Node ]
 	if top_node:
 		# the user told us where to look
-		source_nodes = top_node.find_children("", "Light3D" )
+		source_nodes = top_node.find_children("", "Light3D", recursive_search, sources_must_be_owned )
 	else:
 		# no user direction, try the parent of the FauxGI node
 		var parent = get_parent()
 		if parent:
-			source_nodes = parent.find_children("", "Light3D" )
+			source_nodes = parent.find_children("", "Light3D", recursive_search, sources_must_be_owned )
 	var new_light_sources : Array[ Light3D ] = []
 	if source_nodes:
 		# store all vetted light sources
