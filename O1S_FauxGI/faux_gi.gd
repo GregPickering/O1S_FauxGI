@@ -32,6 +32,8 @@ extends Node3D
 ##	and for going from 2D to 3D normal vectors see:
 ##		Vector3.octahedron_decode( uv: Vector2 )
 
+## Set the VPLs' attenuation (1.0 is Godot standard, 2.0 is physically correct, 0.5 widens & evens out the VPL contributions)
+const VPL_attenuation : float = 0.5
 ## VPLs use omni *AND* spot (180 deg), Compatibility's per-mesh limit is "8 spot + 8 omni"
 const VPLs_use_spots : bool = true
 ## VPLs  cast shadows; if you enable, slower and VPLs_use_spots should be false
@@ -41,7 +43,7 @@ const include_shadowless : bool = false
 ## Do we want to hotkey GTRL+G to toggle FauxGI?
 const enable_ctrl_g : bool = true
 ## scales all light power
-const scale_all_light_energy : float = 1.0
+const scale_all_light_energy : float = 0.25
 ## ignore any VPLs with negligible energy
 const vpl_energy_floor : float = 1e-5
 ## the colors for visualizing raycasts
@@ -49,7 +51,7 @@ const ray_hit_color := Color.LIGHT_GREEN
 const ray_miss_color := Color.LIGHT_CORAL
 const vpl_vis_color := Color.RED
 
-@export_category( "Scene Integration" )
+@export_group( "Scene Integration" )
 ## The node containing all the lights we wish to GI-ify
 @export var top_node : Node3D = null
 ## A label if we want some status text
@@ -68,15 +70,19 @@ const vpl_vis_color := Color.RED
 ## Visualize the VPLs?
 @export var show_vpls : bool = false
 
-@export_category( "Optimization" )
+@export_group( "Optimization", "opt" )
 ## Don't create VPLs if the source light is farther than this
-@export var max_source_dist : float = 20.0
+@export var opt_max_dist : float = 20.0
 ## Don't create VPLs if the source light is farther than this from the view volume
-@export var expand_view_volume : float = 2.0
+@export var opt_expand_view_volume : float = 2.0
 ## Fade in lights' contributions as it approaches the view volume
-@export var fade_in_dist : float = 2.0
+@export var opt_fade_in_dist : float = 2.0
+## Reduce the number of VPLs per light as they get farther away? Can cause flickering!
+@export var opt_lod_vpl_count : bool = false
+## Reduce the number of oversamples per VPLs as they get farther away?
+@export var opt_lod_oversample : bool = true
 
-@export_category( "Spot & Omni Lights" )
+@export_group( "Spot & Omni Lights" )
 ## How many VPLs to generate per source SpotLight3D, 1+
 @export_range( 1, 8 ) var vpls_per_spot : int = 1:
 		set( value ):
@@ -96,7 +102,7 @@ const vpl_vis_color := Color.RED
 ## place the VPL (0=at light origin, 1=at intersection)
 @export_range( 0.0, 1.1, 0.01 ) var placement_fraction : float = 0.5
 
-@export_category( "Directional Lights" )
+@export_group( "Directional Lights" )
 ## How many shared VPLs to approximate all DirectionalLight3D's.  A value
 ## of 0 will use a Virtual Directional Light per source instead (which is 
 ## a cheap but horrible approximation for indoors)
@@ -116,7 +122,7 @@ const vpl_vis_color := Color.RED
 ## Max distance to check for directional light being intercepted
 @export var dir_scan_length : float = 100.0
 
-@export_category( "Ambient" )
+@export_group( "Ambient" )
 ## Should this update the "Ambient Light" in a WorldEnvironment node?
 @export var environment_node : WorldEnvironment = null
 ## How strong should this effect be
@@ -211,27 +217,34 @@ func _physics_process( _delta ):
 		for light in light_sources:
 			var use_light : bool = (light.light_energy > 0.0) and light.is_visible_in_tree()
 			var fade_factor : float = 1.0
+			var vpls_for_this_light : int = 1
+			var oversample_for_this_light : int = oversample
 			if use_light and (light.get_class() != "DirectionalLight3D"):
-				# Omni and Spotlights have to do a position check too
-				#var light_range : float = 0.0
-				#if light.get_class() == "OmniLight3D":
-					#light_range = light.omni_range
-				#else:
-					#light_range = light.spot_range
+				# see if this source is within the view volume
 				var light_pos : Vector3 = light.global_position
-				var dist_outside_view : float = cam_pos.distance_to( light_pos ) - max_source_dist
+				var dist_to_light : float = cam_pos.distance_to( light_pos )
+				var dist_outside_view : float = dist_to_light - opt_max_dist
 				for plane_idx in range( 2, 6 ):
 					dist_outside_view = max( dist_outside_view,
-							cam_planes[ plane_idx ].distance_to( light_pos ) - expand_view_volume )
-				use_light = (dist_outside_view <= fade_in_dist)
-				if use_light and (dist_outside_view > 0.0):
-					fade_factor = 1.0 - dist_outside_view / fade_in_dist
+							cam_planes[ plane_idx ].distance_to( light_pos ) - opt_expand_view_volume )
+				if dist_outside_view > opt_fade_in_dist:
+					use_light = false
+				else:
+					# fade?
+					if dist_outside_view > 0.0:
+						fade_factor = 1.0 - dist_outside_view / opt_fade_in_dist
+					# Apply LOD reductions of the VPL count and/or the oversample...only reduce to 1/2
+					vpls_for_this_light = vpls_per_omni if (light.get_class() == "OmniLight3D") else vpls_per_spot
+					if opt_lod_vpl_count:
+						vpls_for_this_light = lerpf( vpls_for_this_light, 1, 0.5 * dist_to_light / opt_max_dist )
+					if opt_lod_oversample and (oversample > 0):
+						oversample_for_this_light = lerpf( oversample_for_this_light, 1, 0.5 * dist_to_light / opt_max_dist )
 			if use_light:
 				VPL_targets.get_or_add( light, {} )
 				match light.get_class():
 					"DirectionalLight3D": active_dir_lights.push_back( light )
-					"OmniLight3D": process_omni( light, fade_factor )
-					"SpotLight3D": process_spot( light, fade_factor )
+					"OmniLight3D": process_omni( light, vpls_for_this_light, oversample_for_this_light, fade_factor )
+					"SpotLight3D": process_spot( light, vpls_for_this_light, oversample_for_this_light, fade_factor )
 			else:
 				erase_light_data( light )
 		# Directional lights
@@ -412,7 +425,7 @@ func filter_and_emit_VPLs():
 		# sort most to least energetic
 		preVPLs.sort_custom( func(a, b): return a[ ray_storage.sort_score ] > b[ ray_storage.sort_score ] )
 		# do I want to average all the lights that will get cut?
-		if true:
+		if false:
 			var avg_VPL : Dictionary = preVPLs[ 0 ]
 			for key in avg_VPL:
 				avg_VPL[ key ] *= 0.0
@@ -626,12 +639,12 @@ func zero_light_target( light : Light3D, idx : int ):
 	if light and VPL_targets.has( light ) and VPL_targets[ light ].has( idx ):
 		VPL_targets[ light ][ idx ][ ray_storage.energy ] = 0.0
 
-func process_light_rays( light : Light3D, rays : PackedVector3Array, angle_deg : float, modulate : float ):
+func process_light_rays( light : Light3D, rays : PackedVector3Array, local_oversample : int, angle_deg : float, modulate : float ):
 	for ray_idx in rays.size():
 		var ray_res := process_rays_angle( 
 						light.global_position, 
 						light.global_position + rays[ ray_idx ],
-						oversample, angle_deg )
+						local_oversample, angle_deg )
 		if ray_res:
 			update_light_target( light, ray_idx, ray_res, modulate )
 			active_VPLs += 1
@@ -714,23 +727,30 @@ func trivial_directional( light : Light3D ):
 	config_VDL( active_VDLs, light.global_basis.z, light.light_color, e )
 	active_VDLs += 1
 
-func process_spot( light : Light3D, fade_factor : float = 1.0 ):
-	var compensate_N_pts : float = 1.0 / vpls_per_spot
+func process_spot( light : Light3D, num_vpls : int, local_oversample : int, fade_factor : float ):
+	var compensate_N_pts : float = 1.0 / num_vpls
 	# these rays never use real random jitter
 	var rays := jitter_ray_angle( -light.spot_range * light.global_basis.z, 
-									vpls_per_spot, light.spot_angle, 100.0 )
-	process_light_rays( light, rays, light.spot_angle * sqrt( compensate_N_pts ), 
+									num_vpls, light.spot_angle, 100.0 )
+	# remove any extraneous VPLs associated with this light
+	for i in range( num_vpls, VPL_targets[ light ].size() ):
+		VPL_targets[ light ].erase( i )
+	# do the work
+	process_light_rays( light, rays, local_oversample, light.spot_angle * sqrt( compensate_N_pts ), 
 		light.light_energy * bounce_gain * scale_all_light_energy * compensate_N_pts * fade_factor )
 
-func process_omni( light : Light3D, fade_factor : float = 1.0 ):
+func process_omni( light : Light3D, num_vpls : int, local_oversample : int, fade_factor : float ):
 	# where do I want to cast rays, and size them correctly
-	var rays := distribute_omni_rays( vpls_per_omni )
+	var rays := distribute_omni_rays( num_vpls )
 	for i in rays.size():
 		rays[i] *= light.omni_range
+	# remove any extraneous VPLs associated with this light
+	for i in range( num_vpls, VPL_targets[ light ].size() ):
+		VPL_targets[ light ].erase( i )
 	# do the ray casts
 	var compensate_N_pts : float = 1.0 / rays.size()
 	var angle_deg : float = sqrt( 14400.0 * compensate_N_pts )
-	process_light_rays( light, rays, angle_deg, 
+	process_light_rays( light, rays, local_oversample, angle_deg, 
 			light.light_energy * bounce_gain * scale_all_light_energy * compensate_N_pts * fade_factor )
 
 func _ready():
@@ -818,6 +838,9 @@ func allocate_VPLs( N : int ):
 			RenderingServer.light_set_param( light, RenderingServer.LIGHT_PARAM_SPECULAR, 0.0 )
 			if spot_instead:
 				RenderingServer.light_set_param( light, RenderingServer.LIGHT_PARAM_SPOT_ANGLE, 180.0 )
+				RenderingServer.light_set_param( light, RenderingServer.LIGHT_PARAM_SPOT_ATTENUATION, VPL_attenuation )
+			else:
+				RenderingServer.light_set_param( light, RenderingServer.LIGHT_PARAM_ATTENUATION, VPL_attenuation )
 			if VPLS_cast_shadows:
 				if not spot_instead:
 					if renderer_type.gl_compatibility == render:
