@@ -9,8 +9,8 @@
 
 [sub_resource type="Environment" id="Environment_q5cge"]
 ambient_light_source = 2
-ambient_light_color = Color(0.814678, 0.999883, 0.845281, 1)
-ambient_light_energy = 0.0706076
+ambient_light_color = Color(0.666238, 0.945608, 0.728612, 1)
+ambient_light_energy = 0.149056
 tonemap_mode = 3
 volumetric_fog_density = 0.271
 
@@ -28,13 +28,12 @@ environment = SubResource("Environment_q5cge")
 [node name="FauxGI" parent="." node_paths=PackedStringArray("top_node", "label_node", "environment_node") instance=ExtResource("1_q5cge")]
 top_node = NodePath("..")
 label_node = NodePath("../UICanvas/FauxGIStatusLabel")
-opt_lod_vpl_count = true
+bounce_gain = 1.0
 environment_node = NodePath("../WorldEnvironment")
 
 [node name="SpinSpot" type="Node3D" parent="."]
-transform = Transform3D(0.972269, 0, -0.233863, 0, 1, 0, 0.233863, 0, 0.972269, 0, 0, 0)
+transform = Transform3D(-0.784784, 0, -0.619769, 0, 1, 0, 0.619769, 0, -0.784784, 0, 0, 0)
 script = ExtResource("3_ok1gl")
-speed = -0.63
 
 [node name="SpotLight3D" type="SpotLight3D" parent="SpinSpot"]
 transform = Transform3D(0.952537, 0.131593, -0.274512, 0.304381, -0.396676, 0.866026, 0.00507104, -0.908477, -0.417903, 0.79985, 3.19763, -0.713908)
@@ -51,7 +50,7 @@ light_energy = 1.5
 shadow_enabled = true
 
 [node name="SpinDir" type="Node3D" parent="."]
-transform = Transform3D(-0.68598, 0, 0.72762, 0, 1, 0, -0.72762, 0, -0.68598, 0, 0, 0)
+transform = Transform3D(-0.712174, 0, -0.702003, 0, 1, 0, 0.702003, 0, -0.712174, 0, 0, 0)
 script = ExtResource("3_ok1gl")
 speed = 0.345
 
@@ -142,7 +141,7 @@ anchor_right = 1.0
 offset_left = -261.0
 offset_bottom = 23.0
 grow_horizontal = 0
-text = "8 VPL, 0 VDL, 0.0706 amb "
+text = "11 VPL, 0 VDL, 0.1491 amb "
 horizontal_alignment = 1
 
 [node name="RendererLabel" type="Label" parent="UICanvas"]

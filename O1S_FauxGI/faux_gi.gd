@@ -33,7 +33,7 @@ extends Node3D
 ##		Vector3.octahedron_decode( uv: Vector2 )
 
 ## Set the VPLs' attenuation (1.0 is Godot standard, 2.0 is physically correct, 0.5 widens & evens out the VPL contributions)
-const VPL_attenuation : float = 0.5
+const VPL_attenuation : float = 0.75
 ## VPLs use omni *AND* spot (180 deg), Compatibility's per-mesh limit is "8 spot + 8 omni"
 const VPLs_use_spots : bool = true
 ## VPLs  cast shadows; if you enable, slower and VPLs_use_spots should be false
@@ -62,13 +62,28 @@ const vpl_vis_color := Color.RED
 @export_range( 1, 32 ) var max_directionals : int = 8
 ## What fraction of energy is preserved each bounce
 @export_range( 0.0, 1.0, 0.01 ) var bounce_gain : float = 0.25
-## What percent of oversamples use repeatable instead of changing pseudo-random
-## vectors (low  values require heavier temporal filtering)
-@export_range( 0.0, 100.0, 0.1 ) var percent_stable : float = 100.0
 ## Visualize the raycasts?
 @export var show_raycasts : bool = false
 ## Visualize the VPLs?
 @export var show_vpls : bool = false
+
+@export_group( "Ambient" )
+## Should this update the "Ambient Light" in a WorldEnvironment node?
+@export var environment_node : WorldEnvironment = null
+## How strong should this effect be
+@export_range( 0.0, 1.0, 0.01 ) var ambient_gain : float = 0.25
+## Do we want a always-on ambient?
+@export_range( 0.0, 0.25, 0.001, "or_greater" ) var base_ambient_energy : float = 0.05
+@export_color_no_alpha var base_ambient_color : Color = Color(1,1,1)
+
+@export_group( "Filtering" )
+## What percent of oversamples use repeatable instead of changing pseudo-random
+## vectors (low  values require heavier temporal filtering)
+@export_range( 0.0, 100.0, 0.1 ) var percent_stable : float = 100.0
+## Median-of-3 filtering
+@export var median_of_3 : bool = false
+## Filter the VPLs over time (0=never update/infinite filtering, 1=instant update/no filtering)
+@export_range( 0.01, 1.0, 0.005, "exp") var temporal_filter : float = 0.25
 
 @export_group( "Optimization", "opt" )
 ## Don't create VPLs if the source light is farther than this
@@ -95,12 +110,10 @@ const vpl_vis_color := Color.RED
 			light_data_stale = true
 ## How many raycasts per VPL per _physics_process for spot and omni lights, 0+
 @export_range( 0, 100 ) var oversample : int = 8
-## Median-of-3 filtering
-@export var median_of_3 : bool = false
-## Filter the VPLs over time (0=never update/infinite filtering, 1=instant update/no filtering)
-@export_range( 0.01, 1.0, 0.005, "exp") var temporal_filter : float = 0.5
 ## place the VPL (0=at light origin, 1=at intersection)
 @export_range( 0.0, 1.1, 0.01 ) var placement_fraction : float = 0.5
+## Offset the intersection point from the surface 
+@export var surface_offset : float = 0.1
 
 @export_group( "Directional Lights" )
 ## How many shared VPLs to approximate all DirectionalLight3D's.  A value
@@ -122,14 +135,6 @@ const vpl_vis_color := Color.RED
 ## Max distance to check for directional light being intercepted
 @export var dir_scan_length : float = 100.0
 
-@export_group( "Ambient" )
-## Should this update the "Ambient Light" in a WorldEnvironment node?
-@export var environment_node : WorldEnvironment = null
-## How strong should this effect be
-@export_range( 0.0, 1.0, 0.01 ) var ambient_gain : float = 0.25
-## Do we want a always-on ambient?
-@export_range( 0.0, 0.25, 0.001, "or_greater" ) var base_ambient_energy : float = 0.05
-@export_color_no_alpha var base_ambient_color : Color = Color(1,1,1)
 
 # original light sources in the scene
 var light_sources : Array[ Light3D ] = []
@@ -186,6 +191,7 @@ func _unhandled_key_input( event ):
 
 ## I need to raycast, which happens here in the physics process
 var rescan_in_n : int = 60 # scan for light changes every second or so
+var amb_dirty : bool = true
 func _physics_process( _delta ):
 	var ts_in_us : int = Time.get_ticks_usec()
 	var ts_physics : int = ts_in_us
@@ -236,9 +242,9 @@ func _physics_process( _delta ):
 					# Apply LOD reductions of the VPL count and/or the oversample...only reduce to 1/2
 					vpls_for_this_light = vpls_per_omni if (light.get_class() == "OmniLight3D") else vpls_per_spot
 					if opt_lod_vpl_count:
-						vpls_for_this_light = lerpf( vpls_for_this_light, 1, 0.5 * dist_to_light / opt_max_dist )
+						vpls_for_this_light = roundi( lerpf( vpls_for_this_light, 1, 0.5 * dist_to_light / opt_max_dist ) )
 					if opt_lod_oversample and (oversample > 0):
-						oversample_for_this_light = lerpf( oversample_for_this_light, 1, 0.5 * dist_to_light / opt_max_dist )
+						oversample_for_this_light = roundi( lerpf( oversample_for_this_light, 1, 0.5 * dist_to_light / opt_max_dist ) )
 			if use_light:
 				VPL_targets.get_or_add( light, {} )
 				match light.get_class():
@@ -249,6 +255,7 @@ func _physics_process( _delta ):
 				erase_light_data( light )
 		# Directional lights
 		handle_all_directional_lights( active_dir_lights )
+		amb_dirty = true
 		# done with physics raycasts
 		ts_physics = Time.get_ticks_usec()
 		# do something with that info
@@ -257,7 +264,9 @@ func _physics_process( _delta ):
 		VPL_targets.clear()
 	
 	if (bounce_gain < 0.01) or (ambient_gain < 0.01) or not vis:
-		disable_ambient_secondaries()
+		if amb_dirty:
+			disable_ambient_secondaries()
+			amb_dirty = false
 	
 	# the user may wish to display raycasts
 	draw_rays.clear_surfaces()
@@ -525,8 +534,9 @@ func process_rays_average( from : Vector3, rays : PackedVector3Array ) -> Dictio
 	if avg_ray_res:
 		# divide by sum_energy, which had to be > 0 to create avg_ray_res
 		var gain = 1.0 / sum_energy
-		avg_ray_res[ ray_storage.pos ] *= gain
 		avg_ray_res[ ray_storage.norm ] *= gain
+		avg_ray_res[ ray_storage.pos ] *= gain
+		avg_ray_res[ ray_storage.pos ] += avg_ray_res[ ray_storage.norm ] * (surface_offset * placement_fraction)
 		avg_ray_res[ ray_storage.rad ] *= gain
 		# and the energy itself is scaled by the number of samples
 		avg_ray_res[ ray_storage.energy ] = sum_energy / rays.size()
@@ -792,8 +802,8 @@ func scan_light_sources():
 		light_sources = new_light_sources
 		light_data_stale = true
 		# report
-		print( "Source count is ", new_light_sources.size() )
-		print( "VPL max count is ", VPL_light.size() )
+		#print( "Source count is ", new_light_sources.size() )
+		#print( "VPL max count is ", VPL_light.size() )
 
 func qrnd_distrib( index : int, scale_01 : float = 1.0 ) -> Vector2:
 	const mid2d := Vector2.ONE * 0.5
@@ -803,9 +813,11 @@ func qrnd_distrib( index : int, scale_01 : float = 1.0 ) -> Vector2:
 
 func _enter_tree():
 	allocate_VPLs( max_vpls )
+	allocate_VDLs( max_directionals )
 
 func _exit_tree():
 	allocate_VPLs( 0 )
+	allocate_VDLs( 0 )
 
 func allocate_VPLs( N : int ):
 	if N != VPL_inst.size():
